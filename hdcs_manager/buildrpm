@@ -1,0 +1,62 @@
+#!/usr/bin/env bash
+
+set -e
+set -o xtrace
+
+TOPDIR=$(cd "$(dirname "$0")" && pwd)
+TEMP=`mktemp`; rm -rfv $TEMP >/dev/null; mkdir -p $TEMP;
+echo '%debug_package %{nil}' >> ~/.rpmmacros
+
+#---------------------------------------------
+# Load Function
+#---------------------------------------------
+
+SOURCE_DIR=source
+HSM_DIR=hsm
+HSMCLIENT_DIR=python-hsmclient
+HSMDASHBOARD_DIR=hsm-dashboard
+HSM_DEPLOY_DIR=hsm-deploy
+
+for n in `ls $TOPDIR/.lib/`; do
+    source $TOPDIR/.lib/$n
+done
+[[ -e ~/rpmbuild ]] && rm -rf ~/rpmbuild
+
+find $TOPDIR -name "*.pyc" | xargs -i rm -rf {}
+find $TOPDIR -name "*.pyo" | xargs -i rm -rf {}
+
+create_dir
+
+#---------------------------------------------
+# Begin to build HSM rpms.
+#---------------------------------------------
+
+build_hsm_rpm
+
+#---------------------------------------------
+# Begin to build python-hsmclient rpm.
+#---------------------------------------------
+
+build_hsmclient_rpm
+
+#---------------------------------------------
+# Begin to build hsm-dashboard rpm
+#---------------------------------------------
+
+build_hsm_dashboard_rpm
+
+#---------------------------------------------
+# hsm deploy
+#---------------------------------------------
+
+build_hsmdeploy_rpm
+
+#---------------------------------------------
+# Update hsmrepo
+#---------------------------------------------
+
+__create_repo_by_rpms
+
+rm -rf $TEMP
+
+set +o xtrace

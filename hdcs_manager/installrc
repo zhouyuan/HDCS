@@ -1,0 +1,34 @@
+#---------------------------------------------
+# CONTROLLER_ADDRESS
+#---------------------------------------------
+#CONTROLLER_ADDRESS=10.0.0.10
+
+#---------------------------------------------
+# AGENT_ADDRESS_LIST
+#---------------------------------------------
+#AGENT_ADDRESS_LIST=10.0.0.11,10.0.0.12,10.0.0.13
+
+#---------------------------------------------
+# MySQL
+#---------------------------------------------
+#MYSQL_HOST=10.0.0.10
+#MYSQL_ROOT_USER=root
+#MYSQL_ROOT_PASSWORD=1db5b529d24e372270e5
+
+#---------------------------------------------
+# RabbitMQ
+#---------------------------------------------
+#RABBITMQ_HOST=10.0.0.10
+#RABBITMQ_USER=hsm
+#RABBITMQ_PASSWORD=6c3cd1c01cc8fe32d249
+#RABBITMQ_PORT=5672
+
+#---------------------------------------------
+# Keystone
+#---------------------------------------------
+#MYSQL_KEYSTONE_USER=keystone
+#MYSQL_KEYSTONE_PASSWORD=170bb913c35f666549ab
+#KEYSTONE_HOST=10.0.0.10
+#ADMIN_TOKEN=ed39bb2c57262d676f0e
+#ADMIN_USER=admin
+#ADMIN_PASSWORD=cd90962a897567eb3af6

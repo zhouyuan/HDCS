@@ -1,0 +1,5 @@
+hsm (2016.12-1) unstable; urgency=low
+
+  * Initial release (Closes: #nnnn)  <nnnn is the bug number of your ITP>
+
+ -- intel <intel@intel.com>  Thu, 1 Dec 2016 09:58:52 +0800

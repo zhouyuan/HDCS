@@ -1,0 +1,65 @@
+#!/usr/bin/env bash
+
+set -e
+set -o xtrace
+
+TOPDIR=$(cd "$(dirname "$0")" && pwd)
+TEMP=`mktemp`; rm -rfv $TEMP >/dev/null; mkdir -p $TEMP;
+echo '%debug_package %{nil}' >> ~/.rpmmacros
+
+mkdir -p $TOPDIR/hsmrepo
+
+#---------------------------------------------
+# Load Function
+#---------------------------------------------
+
+SOURCE_DIR=source
+HSM_DIR=hsm
+HSMCLIENT_DIR=python-hsmclient
+HSMDASHBOARD_DIR=hsm-dashboard
+HSM_DEPLOY_DIR=hsm-deploy
+
+for n in `ls $TOPDIR/.lib/`; do
+    source $TOPDIR/.lib/$n
+done
+
+find $TOPDIR -name "*.pyc" | xargs -i rm -rf {}
+find $TOPDIR -name "*.pyo" | xargs -i rm -rf {}
+
+#---------------------------------------------
+# Begin to build hsm deb
+#---------------------------------------------
+
+build_hsm_deb
+
+#---------------------------------------------
+# Begin to build python-hsmclient deb
+#---------------------------------------------
+
+build_hsmclient_deb
+
+#---------------------------------------------
+# Begin to build hsm-dashboard deb
+#---------------------------------------------
+
+build_hsm_dashboard_deb
+
+#---------------------------------------------
+# Begin to build hsm-deploy deb
+#---------------------------------------------
+
+build_hsmdeploy_deb
+
+#---------------------------------------------
+# Update hsmrepo
+#---------------------------------------------
+
+is_dpkg_dev=`dpkg -s dpkg-dev|grep "install ok installed"|wc -l`
+if [[ $is_dpkg_dev -eq 0 ]]; then
+    sudo apt-get install dpkg-dev
+fi
+dpkg-scanpackages hsmrepo | gzip > hsmrepo/Packages.gz
+
+rm -rf $TEMP
+
+set +o xtrace

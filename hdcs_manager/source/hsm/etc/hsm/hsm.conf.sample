@@ -1,0 +1,18 @@
+[DEFAULT]
+rabbit_userid = %RABBITMQ_USER%
+rabbit_password = %RABBITMQ_PASSWORD%
+rabbit_host = %RABBITMQ_HOST%
+rabbit_port = %RABBITMQ_PORT%
+state_path = /opt/stack/data/hsm
+rootwrap_config = /etc/hsm/rootwrap.conf
+api_paste_config = /etc/hsm/api-paste.ini
+sql_connection = mysql://%MYSQL_HSM_USER%:%MYSQL_HSM_PASSWORD%@%MYSQL_HOST%/hsm?charset=utf8
+verbose = True
+auth_strategy = keystone
+
+[keystone_authtoken]
+auth_uri = http://%KEYSTONE_HOST%:5000/v2.0
+identity_uri = http://%KEYSTONE_HOST%:35357
+admin_tenant_name = service
+admin_user = hsm
+admin_password = %KEYSTONE_HSM_SERVICE_PASSWORD%

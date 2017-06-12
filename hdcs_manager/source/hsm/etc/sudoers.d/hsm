@@ -1,0 +1,3 @@
+Defaults:hsm !requiretty
+
+hsm ALL = (root) NOPASSWD: /usr/bin/hsm-rootwrap /etc/hsm/rootwrap.conf *

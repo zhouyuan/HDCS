@@ -1,0 +1,16 @@
+Source: hsm-dashboard
+Section: python
+Priority: optional
+Maintainer: intel <intel@intel.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.4
+XS-Python-Version: all
+
+Package: hsm-dashboard
+Architecture: amd64
+Depends: python, python-setuptools, python-pbr, python-django,
+    python-django-horizon, python-keystoneclient, python-openstack-auth,
+    python-hsmclient
+Description: The HSM Dashboard is a reference implementation of a Django site that
+    uses the Django project to provide web based interactions with the
+    HSM cloud controller.

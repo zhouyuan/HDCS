@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+
+if [[ -f /var/run/hsm/hsm-agent.pid ]]; then
+  update-rc.d -f hsm-agent remove
+  sudo service hsm-agent stop
+fi
+
+if [[ -f /var/run/hsm/hsm-api.pid ]]; then
+  update-rc.d -f hsm-api remove
+  sudo service hsm-api stop
+fi
+
+if [[ -f /var/run/hsm/hsm-conductor.pid ]]; then
+  update-rc.d -f hsm-conductor remove
+  sudo service hsm-conductor stop
+fi
+
+if [[ -f /var/run/hsm/hsm-scheduler.pid ]]; then
+  update-rc.d -f hsm-scheduler remove
+  sudo service hsm-scheduler stop
+fi
+
+DATE=`date "+%Y%m%d%H%M%S"`
+if [[ -d /etc/hsm ]]; then
+  cp -r /etc/hsm .
+  rm -rf hsm/*.tar
+  tar -cf hsm-$DATE.tar hsm
+  rm -rf hsm
+  mv hsm-$DATE.tar /etc/hsm
+fi
+
+rm -rf /etc/hsm/hsm.conf

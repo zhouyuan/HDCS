@@ -1,0 +1,90 @@
+#!/bin/sh
+
+### BEGIN INIT INFO
+# Provides:             hsm-api
+# Required-Start:       $remote_fs $syslog
+# Required-Stop:        $remote_fs $syslog
+# Default-Start:        2 3 4 5
+# Default-Stop:         0 1 6
+# Short-Description:    HSM Storage API Service works provide apis to \
+#		            * Cluster operations
+### END INIT INFO
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin
+
+. /lib/lsb/init-functions
+
+NAME=hsm-api
+DAEMON=/usr/bin/hsm-api
+CONFIGFILE=/etc/hsm/hsm.conf
+PIDFILE=/var/run/hsm/hsm-api.pid
+LOGFILE=/var/log/hsm/hsm-api.log
+
+test -x $DAEMON || exit 5
+
+LOCKFILE=/var/lock/hsm-api
+if [ ! -d /var/run/hsm ]; then
+    mkdir -p /var/run/hsm
+    chown -R hsm /var/run/hsm
+fi
+
+lock_hsmapi() {
+	if [ -x /usr/bin/lockfile-create ]; then
+		lockfile-create $LOCKFILE
+		lockfile-touch $LOCKFILE &
+		LOCKTOUCHPID="$!"
+	fi
+}
+
+unlock_hsmapi() {
+	if [ -x /usr/bin/lockfile-create ] ; then
+		kill $LOCKTOUCHPID
+		lockfile-remove $LOCKFILE
+	fi
+}
+
+RUNASUSER=hsm
+
+case $1 in
+	start)
+		log_daemon_msg "Starting HSM server" "hsm-api"
+		lock_hsmapi
+  		start-stop-daemon --start --background --chuid $RUNASUSER --exec $DAEMON -- --config-file=$CONFIGFILE --log-file=$LOGFILE
+  		PID=`ps -ef|grep hsm-api|awk -F ' ' '{ if($3==1) print $2 }'`
+  		echo $PID > $PIDFILE
+
+		status=$?
+		unlock_hsmapi
+		log_end_msg $status
+  		;;
+	stop)
+		log_daemon_msg "Stopping HSM server" "hsm-api"
+  		start-stop-daemon --stop --quiet --oknodo --pidfile $PIDFILE
+		log_end_msg $?
+		rm -rf $PIDFILE
+  		;;
+	restart|force-reload)
+		$0 stop && sleep 2 && $0 start
+  		;;
+	try-restart)
+		if $0 status >/dev/null; then
+			$0 restart
+		else
+			exit 0
+		fi
+		;;
+	reload)
+		exit 3
+		;;
+	status)
+		if [ `ps -ef|grep hsm-api|wc -l` -gt 3 ]; then
+			log_daemon_msg "HSM server hsm-api is running"
+		else
+			log_daemon_msg "HSM server hsm-api is not running"
+		fi
+		;;
+	*)
+		echo "Usage: $0 {start|stop|restart|try-restart|force-reload|status}"
+		exit 2
+		;;
+esac

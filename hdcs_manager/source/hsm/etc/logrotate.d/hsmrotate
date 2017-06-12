@@ -1,0 +1,7 @@
+/var/log/hsm/*.log {
+    weekly
+    rotate 4
+    missingok
+    compress
+    minsize 100k
+}

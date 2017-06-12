@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+mkdir -p /etc/apache2/conf-enabled
+ln -s /etc/apache2/conf-available/hsm-dashboard.conf /etc/apache2/conf-enabled/hsm-dashboard.conf
+
+mkdir -p /etc/hsm-dashboard
+rm -rf /etc/hsm-dashboard/*
+ln -sf /usr/share/hsm-dashboard/hsm_dashboard/local/local_settings.py /etc/hsm-dashboard/local_settings
+
+chmod -R a+r /usr/share/hsm-dashboard

@@ -1,0 +1,76 @@
+#!/usr/bin/env bash
+
+function setup_hsm_dashboard() {
+    set -o xtrace
+    echo -e "Begin to Setup hsm dashboard"
+
+    # unset proxy
+    unset_proxy
+
+    # config local_settings
+    file=/usr/share/hsm-dashboard/hsm_dashboard/local/local_settings.py
+    template_file=/usr/share/hsm-dashboard/hsm_dashboard/local/local_settings.template
+    [[ -e ${file} ]] && rm -rf ${file}
+    cp -rf ${template_file} ${file}
+    rm -rf /etc/hsm-dashboard/local_settings
+    ln -s $file /etc/hsm-dashboard/local_settings
+    sed -i "s,%KEYSTONE_HOST%,${KEYSTONE_HOST},g" ${file}
+    sed -i "s,%KEYSTONE_HSM_SERVICE_PASSWORD%,${KEYSTONE_HSM_SERVICE_PASSWORD},g" ${file}
+
+    # restart httpd status
+    if [[ `os_check` == "centos" ]]; then
+        sed -i "s,Require all denied,#Require all denied,g" /etc/httpd/conf/httpd.conf
+        systemctl start httpd.service
+    else
+        service apache2 restart
+    fi
+
+    # set https 443 port
+    if [[ `os_check` == "centos" ]]; then
+        service httpd stop
+    else
+        service apache2 stop
+        a2dissite default-ssl
+        rm -rf /etc/apache2/sites-enabled/default-ssl.conf
+        a2enmod ssl
+        a2ensite default-ssl
+    fi
+    mkdir -p /tmp/_keys
+    for _file in exp_key exp_sec exp_csr; do
+        cp ${TOPDIR}/hsm-lib/${_file} /tmp/_keys
+        chmod 755 /tmp/_keys/${_file}
+        sed -i "s,%PASSWORD%,${HSM_HTTPS_PASSWORD},g" /tmp/_keys/${_file}
+    done
+    cd /tmp/_keys
+    ./exp_key
+    cp -rf server.key server.key.secure
+    ./exp_sec
+    ./exp_csr
+    openssl x509 -req -days 7000 -in server.csr -signkey server.key -out server.crt
+    if [[ `os_check` == "centos" ]]; then
+        mkdir -p /etc/httpd/conf.d/keys
+        rm -rf /etc/httpd/conf.d/keys/*
+        cp -rf server.* /etc/httpd/conf.d/keys/
+        # then we begin to set http configurations.
+        sed -i "s,SSLCertificateFile /etc/pki/tls/certs/localhost.crt,SSLCertificateFile /etc/httpd/conf.d/keys/server.crt,g" /etc/httpd/conf.d/ssl.conf
+        sed -i "s,SSLCertificateKeyFile /etc/pki/tls/private/localhost.key,SSLCertificateKeyFile /etc/httpd/conf.d/keys/server.key,g" /etc/httpd/conf.d/ssl.conf
+        sed -i "s,Listen 80,#Listen 80,g" /etc/httpd/conf/httpd.conf
+        service httpd restart
+    else
+        mkdir -p /etc/apache2/keys
+        rm -rf /etc/apache2/keys/*
+        cp -rf server.* /etc/apache2/keys/
+        # then we begin to set http configurations.
+        sed -i "s,/etc/ssl/certs/ssl-cert-snakeoil.pem,/etc/apache2/keys/server.crt,g" /etc/apache2/sites-enabled/default-ssl.conf
+        sed -i "s,/etc/ssl/private/ssl-cert-snakeoil.key,/etc/apache2/keys/server.key,g" /etc/apache2/sites-enabled/default-ssl.conf
+        sed -i "s,Listen 80,#Listen 80,g" /etc/apache2/ports.conf
+        service apache2 reload
+        service apache2 restart
+    fi
+
+    echo -e "Finish to setup hsm dashboard"
+    sleep 2
+
+    set +o xtrace
+}
+

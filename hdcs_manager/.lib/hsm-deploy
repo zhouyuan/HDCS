@@ -1,0 +1,62 @@
+function _install_hsmdeploy_rpm_dep_package() {
+    sudo yum install -y rpm-build
+}
+
+function _setup_hsmdeploy_rpm() {
+    rm -rf $TEMP/*
+    local old_dir=`pwd`
+    local version=`cat VERSION`
+ 
+    cp -rf $TOPDIR/$SOURCE_DIR/$HSM_DEPLOY_DIR $TEMP/
+    cd $TEMP/
+
+    if [[ $HSM_DEPLOY_DIR != hsm-deploy-$version ]]; then
+        mv $HSM_DEPLOY_DIR hsm-deploy-$version
+    fi
+
+    tar zcf hsm-deploy-${version}.tar.gz hsm-deploy-$version
+    cp -rf hsm-deploy-${version}.tar.gz ~/rpmbuild/SOURCES/
+    cp -rf hsm-deploy-$version/hsm-deploy.spec ~/rpmbuild/SPECS/
+    _install_hsmdeploy_rpm_dep_package hsm-deploy-$version/hsm-deploy.spec
+    cd ~/rpmbuild/SPECS/
+    rpmbuild -bb hsm-deploy.spec
+
+    cd $old_dir
+}
+
+function build_hsmdeploy_rpm() {
+    _setup_hsmdeploy_rpm
+}
+
+function _install_hsmdeploy_deb_dep_package() {
+    sudo apt-get install -y debhelper
+    sudo apt-get install -y python-setuptools python-pbr
+}
+
+function _setup_hsmdeploy_deb() {
+    rm -rf $TEMP/*
+    local old_dir=`pwd`
+    local version=$VERSION
+    local release=$RELEASE
+
+    cp -rf $TOPDIR/$SOURCE_DIR/$HSM_DEPLOY_DIR $TEMP/
+    cd $TEMP/
+
+    if [[ $HSM_DEPLOY_DIR != hsm-deploy-$version ]]; then
+        mv $HSM_DEPLOY_DIR hsm-deploy-$version
+    fi
+
+    sed -i "s,2016.12-1.2,$version-$release,g" hsm-deploy-$version/debian/rules
+
+    cd hsm-deploy-$version
+    _install_hsmdeploy_deb_dep_package
+    fakeroot debian/rules binary-arch
+    cd ..
+    cp *.deb $TOPDIR/hsmrepo
+
+    cd $old_dir
+}
+
+function build_hsmdeploy_deb() {
+    _setup_hsmdeploy_deb
+}

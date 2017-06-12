@@ -1,0 +1,7 @@
+[run]
+branch = True
+source = hsm
+omit = hsm/tests/*,hsm/openstack/*
+
+[report]
+ignore_errors = True

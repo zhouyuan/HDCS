@@ -1,0 +1,15 @@
+Source: python-hsmclient
+Section: python
+Priority: optional
+Maintainer: intel <intel@intel.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.4
+XS-Python-Version: all
+
+Package: python-hsmclient
+Architecture: amd64
+Depends: python, python-pbr, python-babel, python-six,
+    python-requests, python-prettytable
+Description: This is a client for the hsm API. There's a Python API
+    (the hsmclient module), and a command-line script (hsm).
+    Each implements 100% of the hsm API.

@@ -1,0 +1,11 @@
+Source: hsm-deploy
+Section: unknown
+Priority: optional
+Maintainer: intel <intel@intel.com>
+Build-Depends: debhelper (>= 8.0.0)
+Standards-Version: 3.9.4
+
+Package: hsm-deploy
+Architecture: amd64
+Depends: python
+Description: Intel HSM Storage System Tools Kit.

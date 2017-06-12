@@ -1,0 +1,33 @@
+# hsm-rootwrap command filters for storage nodes
+# This file should be owned by (and only-writeable by) the root user
+
+[Filters]
+hsm-assist: CommandFilter, /usr/bin/hsm-assist, root
+
+touch: CommandFilter, /bin/touch, root
+
+mkdir: CommandFilter, /bin/mkdir, root
+
+hostname: CommandFilter, /bin/hostname, root
+
+ls: CommandFilter, /bin/ls, root
+
+pgrep: CommandFilter, /usr/bin/pgrep, root
+
+ssh-keygen: CommandFilter, /usr/bin/ssh-keygen, root
+
+chown: CommandFilter, /bin/chown, root
+
+cat: CommandFilter, /bin/cat, root
+
+chmod: CommandFilter, /bin/chmod, root
+
+rm: CommandFilter, /bin/rm, root
+
+rbd: CommandFilter, /usr/bin/rbd, root
+
+ceph: CommandFilter, /usr/bin/ceph, root
+
+crudini: CommandFilter, /usr/bin/crudini, root
+
+hsm: CommandFilter, /usr/bin/hsm, root

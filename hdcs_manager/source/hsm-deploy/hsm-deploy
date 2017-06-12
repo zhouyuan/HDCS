@@ -1,0 +1,284 @@
+#!/usr/bin/env bash
+
+#---------------------------------------------
+# Usage
+#---------------------------------------------
+function usage() {
+    cat <<EOF
+Usage:
+    hsm-deploy [c-deploy]
+               [a-deploy]
+               [c-redeploy]
+               [a-redeploy]
+               [clean-data]
+    c: controller node
+    a: agent node
+
+Options:
+    --help|-h
+        Print usage information.
+
+Sub Command:
+    c-deploy
+        Deploy controller node.
+    a-deploy
+        Deploy agent node.
+    c-redeploy
+        Clean up related data and deploy controller node again.
+    a-redeploy
+        Clean up related data and deploy agent node again.
+    clean-data
+        Clean up related data.
+EOF
+    exit 0
+}
+
+while [ $# -gt 0 ]; do
+    case "$1" in
+        -h) usage ;;
+        --help) usage ;;
+        c-deploy) DEPLOY_CONTROLLER_NODE=1 ;;
+        a-deploy) DEPLOY_AGENT_NODE=1 ;;
+        c-redeploy) REDEPLOY_CONTROLLER_NODE=1 ;;
+        a-redeploy) REDEPLOY_AGENT_NODE=1 ;;
+        clean-data) CLEAN_DATA=1 ;;
+        *) shift ;;
+    esac
+    shift
+done
+
+set -o xtrace
+
+TOPDIR=$(cd $(dirname "$0") && pwd)
+
+DEPLOYRC=/etc/hsmdeploy/deployrc
+# Check the deployrc file exists or not.
+if [[ ! -f ${DEPLOYRC} ]]; then
+    echo -e "If the node is a controller node, please run hsm-generate-deployrc commnad first."
+    echo -e "If the node is an agent node, please fetch the ${DEPLOYRC} file from controller node first."
+    exit 1
+fi
+
+if [[ ! ${DEPLOY_CONTROLLER_NODE} ]] && [[ ! ${DEPLOY_AGENT_NODE} ]] && \
+[[ ! ${REDEPLOY_CONTROLLER_NODE} ]] && [[ ! ${REDEPLOY_AGENT_NODE} ]] && \
+[[ ! ${CLEAN_DATA} ]]; then
+    echo -e "Please run sub command for hsm-deploy"
+    exit 1
+fi
+
+source ${DEPLOYRC}
+source ${TOPDIR}/hsm-lib/hsm-common
+source ${TOPDIR}/hsm-lib/setup-mysql
+source ${TOPDIR}/hsm-lib/setup-rabbitmq
+source ${TOPDIR}/hsm-lib/setup-keystone
+source ${TOPDIR}/hsm-lib/setup-hsm-controller
+source ${TOPDIR}/hsm-lib/setup-hsm-dashboard
+source ${TOPDIR}/hsm-lib/setup-hsm-agent
+
+# Check all related packages should be installed in controller.
+function check_contoller_related_packaged() {
+    if [[ `os_check` == "centos" ]]; then
+        # expect
+        if [[ `rpm -qa|grep -i expect|wc -l` -eq 0 ]]; then
+            echo -e "Not install expect"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # crudini
+        if [[ `rpm -qa|grep -i crudini|wc -l` -eq 0 ]]; then
+            echo -e "Not install crudini"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # mariadb-server
+        if [[ `rpm -qa|grep -i mariadb-server|wc -l` -eq 0 ]]; then
+            echo -e "Not install mariadb-server"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # rabbitmq-server
+        if [[ `rpm -qa|grep -i rabbitmq-server|wc -l` -eq 0 ]]; then
+            echo -e "Not install rabbitmq-server"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # openstack-keystone
+        if [[ `rpm -qa|grep -i openstack-keystone|wc -l` -eq 0 ]]; then
+            echo -e "Not install openstack-keystone"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+    else
+        # expect
+        dpkg -s expect
+        if [[ `echo $?` != 0 ]]; then
+            echo -e "Not install expect"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # crudini
+        dpkg -s crudini
+        if [[ `echo $?` != 0 ]]; then
+            echo -e "Not install crudini"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # mariadb-server
+        dpkg -s mariadb-server || dpkg -s mariadb-server-5.5
+        if [[ `echo $?` != 0 ]]; then
+            echo -e "Not install mariadb-server"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # rabbitmq-server
+        dpkg -s rabbitmq-server
+        if [[ `echo $?` != 0 ]]; then
+            echo -e "Not install rabbitmq-server"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+        # keystone
+        dpkg -s keystone
+        if [[ `echo $?` != 0 ]]; then
+            echo -e "Not install keystone"
+            echo -e "Please run hsm-preinstall command first."
+            exit 1
+        fi
+    fi
+}
+
+function deploy_controller() {
+    check_contoller_related_packaged
+    if [[ `os_check` == "centos" ]]; then
+        stop_firewalld
+        disable_selinux
+    fi
+    # set_sshd
+    ssh_root_key_gen
+
+    # deploy mysql
+    if [[ ${SETUP_MYSQL} == True ]]; then
+        setup_mysql
+    fi
+
+    # deploy rabbitmq
+    if [[ ${SETUP_RABBITMQ} == True ]]; then
+        setup_rabbitmq
+    fi
+
+    # deploy keystone
+    if [[ ${SETUP_KEYSTONE} == True ]]; then
+        setup_keystone
+    else
+        create_keystone_endpoint_v2
+        set_default_domain_id
+    fi
+
+    # deploy hsm-controller
+    setup_hsm_controller
+
+    # deploy hsm-dashboard
+    setup_hsm_dashboard
+
+    #---------------------------------------------------
+    # Generate Keystone RC
+    #---------------------------------------------------
+    cat <<EOF > ~/hsm-keyrc
+export OS_TENANT_NAME=${ADMIN_USER}
+export OS_USERNAME=${ADMIN_USER}
+export OS_PASSWORD=${ADMIN_PASSWORD}
+export OS_AUTH_URL=http://${KEYSTONE_HOST}:5000/v2.0
+EOF
+
+    # rc.local add hsm-api, hsm-scheduler and hsm-conductor
+    local rc_local_file=/etc/rc.local
+    if [[ `os_check` == "centos" ]]; then
+        local rc_local_file=/etc/rc.d/rc.local
+    fi
+    sed -i "/exit/d" ${rc_local_file}
+    sed -i "/service hsm-api restart/d" ${rc_local_file}
+    sed -i "/service hsm-scheduler restart/d" ${rc_local_file}
+    sed -i "/service hsm-conductor restart/d" ${rc_local_file}
+    echo "service hsm-api restart" >> ${rc_local_file}
+    echo "service hsm-scheduler restart" >> ${rc_local_file}
+    echo "service hsm-conductor restart" >> ${rc_local_file}
+    echo "exit 0" >> ${rc_local_file}
+}
+
+function deploy_agent() {
+    if [[ `os_check` == "centos" ]]; then
+        stop_firewalld
+        disable_selinux
+    fi
+    # set_sshd
+    ssh_root_key_gen
+
+    # deploy hsm agent
+    setup_hsm_agent
+
+    # rc.local add hsm-agent
+    local rc_local_file=/etc/rc.local
+    if [[ `os_check` == "centos" ]]; then
+        local rc_local_file=/etc/rc.d/rc.local
+    fi
+    sed -i '/exit/d' ${rc_local_file}
+    sed -i "/service hsm-agent restart/d" ${rc_local_file}
+    echo "service hsm-agent restart" >> ${rc_local_file}
+    echo "exit 0" >> ${rc_local_file}
+}
+
+function stop_all_services() {
+    # stop service
+    service hsm-api stop
+    service hsm-conductor stop
+    service hsm-scheduler stop
+    service hsm-agent stop
+}
+
+function clean_data() {
+    stop_all_services
+
+    local address=`hostname -I`
+    local ret=0
+    for addr in ${address}; do
+        if [[ ${addr} == ${HSM_HOST} ]]; then
+            let ret=${ret}+1
+        fi
+    done
+
+    if [[ ${ret} != 0 ]]; then
+        # clean db data
+        mysql_cmd "DROP DATABASE IF EXISTS hsm;"
+    fi
+}
+
+function redeploy_controller() {
+    clean_data
+    deploy_controller
+}
+
+function redeploy_agent() {
+    deploy_agent
+}
+
+if [[ ${DEPLOY_CONTROLLER_NODE} ]]; then
+    deploy_controller
+fi
+
+if [[ ${DEPLOY_AGENT_NODE} ]]; then
+    deploy_agent
+fi
+
+if [[ ${REDEPLOY_CONTROLLER_NODE} ]]; then
+    redeploy_controller
+fi
+
+if [[ ${REDEPLOY_AGENT_NODE} ]]; then
+    redeploy_agent
+fi
+
+if [[ ${CLEAN_DATA} ]]; then
+    clean_data
+fi
+
+set +o xtrace

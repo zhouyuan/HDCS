@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+DATE=`date "+%Y%m%d%H%M%S"`
+if [[ -f /usr/share/hsm-dashboard/hsm_dashboard/local/local_settings.py ]]; then
+  cp /usr/share/hsm-dashboard/hsm_dashboard/local/local_settings.py /etc/hsm-dashboard/local_settings.$DATE
+fi
+
+rm -rf /etc/hsm-dashboard/local_settings
+rm -rf /usr/share/hsm-dashboard

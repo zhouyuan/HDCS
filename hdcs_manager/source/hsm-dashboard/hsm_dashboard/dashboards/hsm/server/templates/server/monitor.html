@@ -1,0 +1,136 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% block title %}{% trans "Host: " %}{{ host }}{% endblock %}
+
+{% block page_header %}
+    <link href="{{ STATIC_URL }}dashboard/css/common.css" rel="stylesheet">
+    <link href="{{ STATIC_URL }}dashboard/css/server.css" rel="stylesheet">
+{% endblock page_header %}
+
+{% block main %}
+    {% csrf_token %}
+     <!--The frame work of dashboard-->
+    <div id="framework">
+        <!--the main area-->
+        <div id="divMain">
+            <!--OS and Kernel Info-->
+            <div id="divOSAndKernelInfo" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "OS & Kernel" %}</h4>
+                <div id="divOSAndKernelInfoContent" class="hsm-block-content">
+                    <table id="tOSAndKernelInfo" style="width:370px; height:160px;" title={{server_id}}>
+                        <tbody>
+                        <tr style="height:40px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">Distributor ID:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldDistributorId" style="width:240px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:40px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">Release:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldRelease" style="width:240px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:40px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">CodeName:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldCodeName" style="width:240px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:40px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">Kernel:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldKernel" style="width:240px;text-align:left;">--</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!--Memory-->
+            <div id="divMemoryInfo" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "Memory" %}</h4>
+                <div id="divMemoryInfoContent" class="hsm-block-content">
+                    <table id="tMemoryInfo" style="width:270px; height:160px;" title={{server_id}}>
+                        <tbody>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Total:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldTotal" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Used:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldUsed" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Free:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldFree" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Buffers:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldBuffers" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Cached:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldCached" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Available:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldAvailable" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!--CPU Percent-->
+            <div id="divCPUInfo" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "CPU Percent" %}</h4>
+                <div id="divCPUInfoContent" class="hsm-block-content">
+                    <table id="tCPUInfo" style="width:270px; height:160px;" title={{server_id}}>
+                        <tbody>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">User:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldUser" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">System:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldSystem" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Nice:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldNice" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">Idle:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldIdle" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:80px;text-align:right;font-weight:bold;">IOWait:</td>
+                            <td style="width:10px;"></td>
+                            <td id="ldIOWait" style="width:160px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <div id="divFooter" style="width:100%;height:60px;clear:both">
+    </div>
+{% endblock %}
+{% block js %}
+    {{ block.super }}
+    <script src="{{ STATIC_URL }}lib/echarts.js"></script>
+    <script src="{{ STATIC_URL }}dashboard/js/message.js"></script>
+    <script src="{{ STATIC_URL }}dashboard/js/server.js"></script>
+{% endblock %}

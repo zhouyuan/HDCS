@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+
+function setup_hsm_controller() {
+    set -o xtrace
+    echo -e "Begin to Setup hsm controller"
+
+    # unset proxy
+    unset_proxy
+
+    # stop service if it is running
+    for n in ${HSM_CONTROLLER_SERVICES//,/ }; do
+        service ${n} stop
+    done
+
+    # create hsm database
+    mysql_cmd "CREATE DATABASE hsm;"
+    mysql_cmd "GRANT ALL PRIVILEGES ON hsm.* TO '${MYSQL_HSM_USER}'@'localhost' IDENTIFIED BY '${MYSQL_HSM_PASSWORD}';"
+    mysql_cmd "GRANT ALL PRIVILEGES ON hsm.* TO '${MYSQL_HSM_USER}'@'%' IDENTIFIED BY '${MYSQL_HSM_PASSWORD}'"
+
+    # create hsm service entity and API endpoints
+    export OS_TOKEN=${ADMIN_TOKEN}
+    export OS_URL=http://${KEYSTONE_HOST}:35357/v3
+    export OS_IDENTITY_API_VERSION=3
+    if [[ `openstack user list|grep ${KEYSTONE_HSM_SERVICE_USER}|wc -l` -eq 0 ]];then
+        openstack user create ${KEYSTONE_HSM_SERVICE_USER} --domain default --password ${KEYSTONE_HSM_SERVICE_PASSWORD}
+    fi
+    if [[ `openstack role list|grep admin|wc -l` -gt 0 ]]; then
+        openstack role add --project service --user ${KEYSTONE_HSM_SERVICE_USER} admin
+    fi
+    if [[ `openstack service list|grep ${KEYSTONE_HSM_SERVICE}|wc -l` -eq 0 ]]; then
+        openstack service create --name ${KEYSTONE_HSM_SERVICE} --description "Hyperstash Manager Service" ${KEYSTONE_HSM_SERVICE}
+    fi
+    if [[ `openstack endpoint list|grep ${KEYSTONE_HSM_SERVICE}|grep public|wc -l` -eq 0 ]]; then
+        openstack endpoint create --region RegionOne ${KEYSTONE_HSM_SERVICE} public http://${HSM_HOST}:8787/v1/%\(tenant_id\)s
+    fi
+    if [[ `openstack endpoint list|grep ${KEYSTONE_HSM_SERVICE}|grep internal|wc -l` -eq 0 ]]; then
+        openstack endpoint create --region RegionOne ${KEYSTONE_HSM_SERVICE} internal http://${HSM_HOST}:8787/v1/%\(tenant_id\)s
+    fi
+    if [[ `openstack endpoint list|grep ${KEYSTONE_HSM_SERVICE}|grep admin|wc -l` -eq 0 ]]; then
+        openstack endpoint create --region RegionOne ${KEYSTONE_HSM_SERVICE} admin http://${HSM_HOST}:8787/v1/%\(tenant_id\)s
+    fi
+    unset OS_TOKEN OS_URL OS_IDENTITY_API_VERSION
+
+    # config hsm.conf
+    file=/etc/hsm/hsm.conf
+    if [[ ! -f ${file} ]] && [[ -f ${file}.sample ]]; then
+        cp ${file}.sample ${file}
+        chown hsm:root ${file}
+    fi
+    crudini --set ${file} DEFAULT rabbit_userid ${RABBITMQ_USER}
+    crudini --set ${file} DEFAULT rabbit_password ${RABBITMQ_PASSWORD}
+    crudini --set ${file} DEFAULT rabbit_host ${RABBITMQ_HOST}
+    crudini --set ${file} DEFAULT rabbit_port ${RABBITMQ_PORT}
+    sql_connection=mysql://${MYSQL_HSM_USER}:${MYSQL_HSM_PASSWORD}@${MYSQL_HOST}/hsm?charset=utf8
+    crudini --set ${file} DEFAULT sql_connection ${sql_connection}
+    auth_uri=http://${KEYSTONE_HOST}:5000/v2.0
+    crudini --set ${file} keystone_authtoken auth_uri ${auth_uri}
+    identity_uri=http://${KEYSTONE_HOST}:35357
+    crudini --set ${file} keystone_authtoken identity_uri ${identity_uri}
+    crudini --set ${file} keystone_authtoken admin_password ${KEYSTONE_HSM_SERVICE_PASSWORD}
+
+    # hsm db sync
+    hsm-manage db sync
+
+    # start service
+    for n in ${HSM_CONTROLLER_SERVICES//,/ }; do
+        service ${n} start
+    done
+
+    echo -e "Finish to setup hsm controller"
+    sleep 2
+
+    set +o xtrace
+}

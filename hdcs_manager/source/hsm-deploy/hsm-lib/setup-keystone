@@ -1,0 +1,218 @@
+#!/usr/bin/env bash
+
+function set_default_domain_id() {
+    set -o xtrace
+
+    # unset proxy
+    unset_proxy
+
+    export OS_TOKEN=${ADMIN_TOKEN}
+    export OS_URL=http://${KEYSTONE_HOST}:35357/v3
+    export OS_IDENTITY_API_VERSION=3
+
+    local domain_id=`openstack domain list|grep default|awk -F " | " {'print $2'}`
+    crudini --set ${keystone_conf} identity default_domain_id ${domain_id}
+    unset OS_TOKEN OS_URL OS_IDENTITY_API_VERSION
+
+    set +o xtrace
+}
+
+function create_keystone_service() {
+    set -o xtrace
+
+    # unset proxy
+    unset_proxy
+
+    export OS_TOKEN=${ADMIN_TOKEN}
+    export OS_URL=http://${KEYSTONE_HOST}:35357/v3
+    export OS_IDENTITY_API_VERSION=3
+
+    if [[ `openstack service list|grep keystone|wc -l` -eq 0 ]]; then
+        openstack service create --name keystone --description "OpenStack Identity" identity
+    fi
+
+    set +o xtrace
+}
+
+function create_keystone_endpoint_v2() {
+    set -o xtrace
+
+    # unset proxy
+    unset_proxy
+
+    export OS_TOKEN=${ADMIN_TOKEN}
+    export OS_URL=http://${KEYSTONE_HOST}:35357/v3
+    export OS_IDENTITY_API_VERSION=3
+
+    if [[ `openstack endpoint list|grep identity|grep public|wc -l` -eq 0 ]]; then
+        openstack endpoint create --region RegionOne identity public http://${KEYSTONE_HOST}:5000/v2.0
+    else
+        openstack endpoint list|grep identity|grep public|grep v2.0
+        if [[ `echo $?` -gt 0 ]]; then
+            local keystone_public_id=`openstack endpoint list|grep identity|grep public|awk -F ' ' '{print $2}'`
+            openstack endpoint delete ${keystone_public_id}
+            openstack endpoint create --region RegionOne identity public http://${KEYSTONE_HOST}:5000/v2.0
+        fi
+    fi
+    if [[ `openstack endpoint list|grep identity|grep internal|wc -l` -eq 0 ]]; then
+        openstack endpoint create --region RegionOne identity internal http://${KEYSTONE_HOST}:5000/v2.0
+    else
+        openstack endpoint list|grep identity|grep internal|grep v2.0
+        if [[ `echo $?` -gt 0 ]]; then
+            local keystone_internal_id=`openstack endpoint list|grep identity|grep internal|awk -F ' ' '{print $2}'`
+            openstack endpoint delete ${keystone_internal_id}
+            openstack endpoint create --region RegionOne identity internal http://${KEYSTONE_HOST}:5000/v2.0
+        fi
+    fi
+    if [[ `openstack endpoint list|grep identity|grep admin|wc -l` -eq 0 ]]; then
+        openstack endpoint create --region RegionOne identity admin http://${KEYSTONE_HOST}:35357/v2.0
+    else
+        openstack endpoint list|grep identity|grep admin|grep v2.0
+        if [[ `echo $?` -gt 0 ]]; then
+            local keystone_admin_id=`openstack endpoint list|grep identity|grep admin|awk -F ' ' '{print $2}'`
+            openstack endpoint delete ${keystone_admin_id}
+            openstack endpoint create --region RegionOne identity admin http://${KEYSTONE_HOST}:35357/v2.0
+        fi
+    fi
+
+    set +o xtrace
+}
+
+function setup_keystone() {
+    set -o xtrace
+    echo -e "Begin to Setup Keystone"
+
+    # unset proxy
+    unset_proxy
+
+    # create keystone database
+    mysql_cmd "CREATE DATABASE keystone;"
+    mysql_cmd "GRANT ALL PRIVILEGES ON keystone.* TO '${MYSQL_KEYSTONE_USER}'@'localhost' IDENTIFIED BY '${MYSQL_KEYSTONE_PASSWORD}';"
+    mysql_cmd "GRANT ALL PRIVILEGES ON keystone.* TO '${MYSQL_KEYSTONE_USER}'@'%' IDENTIFIED BY '${MYSQL_KEYSTONE_PASSWORD}'"
+
+    # config keystone
+    keystone_conf=/etc/keystone/keystone.conf
+    crudini --set ${keystone_conf} DEFAULT admin_token ${ADMIN_TOKEN}
+    local connection=mysql+pymysql://${MYSQL_KEYSTONE_USER}:${MYSQL_KEYSTONE_PASSWORD}@${KEYSTONE_HOST}/keystone
+    crudini --set ${keystone_conf} database connection ${connection}
+    crudini --set ${keystone_conf} token provider fernet
+
+    su -s /bin/sh -c "keystone-manage db_sync" keystone
+
+    keystone-manage fernet_setup --keystone-user keystone --keystone-group keystone
+
+    # config apache http server
+    if [[ `os_check` == "centos" ]]; then
+        apache_http_conf=/etc/httpd/conf/httpd.conf
+        wsgi_keystone_conf=/etc/httpd/conf.d/wsgi-keystone.conf
+        error_log=/var/log/httpd/keystone-error.log
+        custom_log=/var/log/httpd/keystone-access.log
+    else
+        apache_http_conf=/etc/apache2/apache2.conf
+        wsgi_keystone_conf=/etc/apache2/sites-available/wsgi-keystone.conf
+        error_log=/var/log/apache2/keystone.log
+        custom_log=/var/log/apache2/keystone_access.log
+    fi
+
+    if [[ `grep -e "^ServerName ${KEYSTONE_HOST}" ${apache_http_conf}|wc -l` -lt 1 ]]; then
+        echo "ServerName ${KEYSTONE_HOST}" >> ${apache_http_conf}
+    fi
+
+    cat <<EOF >${wsgi_keystone_conf}
+Listen 5000
+Listen 35357
+
+<VirtualHost *:5000>
+    WSGIDaemonProcess keystone-public processes=5 threads=1 user=keystone group=keystone display-name=%{GROUP}
+    WSGIProcessGroup keystone-public
+    WSGIScriptAlias / /usr/bin/keystone-wsgi-public
+    WSGIApplicationGroup %{GLOBAL}
+    WSGIPassAuthorization On
+    ErrorLogFormat "%{cu}t %M"
+    ErrorLog %ErrorLog%
+    CustomLog %CustomLog% combined
+
+    <Directory /usr/bin>
+        Require all granted
+    </Directory>
+</VirtualHost>
+
+<VirtualHost *:35357>
+    WSGIDaemonProcess keystone-admin processes=5 threads=1 user=keystone group=keystone display-name=%{GROUP}
+    WSGIProcessGroup keystone-admin
+    WSGIScriptAlias / /usr/bin/keystone-wsgi-admin
+    WSGIApplicationGroup %{GLOBAL}
+    WSGIPassAuthorization On
+    ErrorLogFormat "%{cu}t %M"
+    ErrorLog %ErrorLog%
+    CustomLog %CustomLog% combined
+
+    <Directory /usr/bin>
+        Require all granted
+    </Directory>
+</VirtualHost>
+EOF
+    sed -i "s,%ErrorLog%,${error_log},g" ${wsgi_keystone_conf}
+    sed -i "s,%CustomLog%,${custom_log},g" ${wsgi_keystone_conf}
+
+    if [[ `os_check` == "centos" ]]; then
+        systemctl enable httpd.service
+        systemctl restart httpd.service
+    else
+        ln -s ${wsgi_keystone_conf} /etc/apache2/sites-enabled
+        service apache2 restart
+        rm -f /var/lib/keystone/keystone.db
+    fi
+    sleep 5
+
+    # create keystone service entity and API endpoints
+    export OS_TOKEN=${ADMIN_TOKEN}
+    export OS_URL=http://${KEYSTONE_HOST}:35357/v3
+    export OS_IDENTITY_API_VERSION=3
+
+    openstack user list
+    while [[ `echo $?` != 0 ]]; do
+        sleep 1
+        echo -e "Wait to the keystone service is ok."
+        openstack user list
+    done
+
+    # create the service entity and api endpoints
+    create_keystone_service
+    create_keystone_endpoint_v2
+
+    # create a domain, projects, users and roles
+    if [[ `openstack domain list|grep default|wc -l` -eq 0 ]]; then
+        openstack domain create --description "Default Domain" default
+    fi
+    if [[ `openstack project list|grep admin|wc -l` -eq 0 ]]; then
+        openstack project create --domain default --description "Admin Project" admin
+    fi
+    if [[ `openstack user list|grep ${ADMIN_USER}|wc -l` -eq 0 ]]; then
+        openstack user create ${ADMIN_USER} --domain default --password ${ADMIN_PASSWORD}
+    fi
+    if [[ `openstack role list|grep admin|wc -l` -eq 0 ]]; then
+        openstack role create admin
+        openstack role add --project admin --user ${ADMIN_USER} admin
+    fi
+    if [[ `openstack project list|grep service|wc -l` -eq 0 ]]; then
+        openstack project create --domain default --description "Service Project" service
+    fi
+    if [[ `openstack project list|grep demo|wc -l` -eq 0 ]]; then
+        openstack project create --domain default --description "Demo Project" demo
+    fi
+    if [[ `openstack user list|grep ${DEMO_USER}|wc -l` -eq 0 ]]; then
+        openstack user create ${DEMO_USER} --domain default --password ${DEMO_PASSWORD}
+    fi
+    if [[ `openstack role list|grep user|wc -l` -eq 0 ]]; then
+        openstack role create user
+        openstack role add --project demo --user ${DEMO_USER} user
+    fi
+
+    set_default_domain_id
+
+    echo -e "Finish to setup Keystone"
+    sleep 2
+
+    set +o xtrace
+}

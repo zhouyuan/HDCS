@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+
+function setup_hsm_agent() {
+    set -o xtrace
+    echo -e "Begin to Setup hsm agent"
+
+    # config hsm.conf
+    file=/etc/hsm/hsm.conf
+    if [[ ! -f ${file} ]] && [[ -f ${file}.sample ]]; then
+        cp ${file}.sample ${file}
+        chown hsm:root ${file}
+    fi
+    crudini --set ${file} DEFAULT rabbit_userid ${RABBITMQ_USER}
+    crudini --set ${file} DEFAULT rabbit_password ${RABBITMQ_PASSWORD}
+    crudini --set ${file} DEFAULT rabbit_host ${RABBITMQ_HOST}
+    crudini --set ${file} DEFAULT rabbit_port ${RABBITMQ_PORT}
+    sql_connection=mysql://${MYSQL_HSM_USER}:${MYSQL_HSM_PASSWORD}@${MYSQL_HOST}/hsm?charset=utf8
+    crudini --set ${file} DEFAULT sql_connection ${sql_connection}
+    auth_uri=http://${KEYSTONE_HOST}:5000/v2.0
+    crudini --set ${file} keystone_authtoken auth_uri ${auth_uri}
+    identity_uri=http://${KEYSTONE_HOST}:35357
+    crudini --set ${file} keystone_authtoken identity_uri ${identity_uri}
+    crudini --set ${file} keystone_authtoken admin_password ${KEYSTONE_HSM_SERVICE_PASSWORD}
+
+    # start service
+    service hsm-agent restart
+
+    set +o xtrace
+}

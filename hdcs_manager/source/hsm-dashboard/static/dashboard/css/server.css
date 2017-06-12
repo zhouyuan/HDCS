@@ -1,0 +1,36 @@
+#framework
+{
+    text-align: left;
+    margin-left:5px;
+}
+
+#divMain{
+    text-align: left;
+    width: 1024px;
+    height: auto;
+}
+
+#divOSAndKernelInfo{
+    width: 400px;
+}
+
+#divOSAndKernelInfoContent{
+    height: 180px;
+}
+
+#divMemoryInfo{
+    width: 300px;
+}
+
+#divMemoryInfoContent{
+    height: 180px;
+}
+
+#divCPUInfo{
+    width: 300px;
+    margin-top: -5px;
+}
+
+#divCPUInfoContent{
+    height: 180px;
+}

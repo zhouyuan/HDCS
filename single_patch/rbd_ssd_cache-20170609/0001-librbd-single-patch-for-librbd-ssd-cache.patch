@@ -1,0 +1,2428 @@
+From e1191990e60309f1eb9a67dbdd9bff49eae581b4 Mon Sep 17 00:00:00 2001
+From: Yuanhui Xu <yuanhui.xu@intel.com>
+Date: Sat, 1 Apr 2017 15:37:06 +0800
+Subject: [PATCH] librbd-single-patch-for-librbd-ssd-cache
+
+Signed-off-by: Yuanhui Xu <yuanhui.xu@intel.com>
+---
+ make-debs.sh                       |   4 +-
+ src/common/config_opts.h           |   5 +
+ src/common/dout.h                  |   2 +-
+ src/include/rbd/librbd.h           |   2 +
+ src/librbd/CacheImageCtx.cc        |  75 ++++
+ src/librbd/CacheImageCtx.h         |  40 ++
+ src/librbd/ImageCtx.cc             |   2 +-
+ src/librbd/ImageCtx.h              |   1 +
+ src/librbd/ImageState.h            |   2 +-
+ src/librbd/Makefile.am             |   4 +
+ src/librbd/SimpleBlockCacher.cpp   | 641 +++++++++++++++++++++++++++++++
+ src/librbd/internal.cc             |  26 +-
+ src/librbd/librbd.cc               | 111 +++++-
+ src/librbd/libsbc.cpp              |  54 +++
+ src/librbd/sbc/SimpleBlockCacher.h | 334 +++++++++++++++++
+ src/librbd/sbc/common.h            | 748 +++++++++++++++++++++++++++++++++++++
+ src/librbd/sbc/libsbc.h            |  35 ++
+ src/test/Makefile-client.am        |   1 +
+ src/tools/Makefile-client.am       |   1 +
+ src/tools/rbd/action/Remove.cc     |   6 +
+ 20 files changed, 2071 insertions(+), 23 deletions(-)
+ create mode 100644 src/librbd/CacheImageCtx.cc
+ create mode 100644 src/librbd/CacheImageCtx.h
+ create mode 100644 src/librbd/SimpleBlockCacher.cpp
+ create mode 100644 src/librbd/libsbc.cpp
+ create mode 100644 src/librbd/sbc/SimpleBlockCacher.h
+ create mode 100644 src/librbd/sbc/common.h
+ create mode 100644 src/librbd/sbc/libsbc.h
+
+diff --git a/make-debs.sh b/make-debs.sh
+index 076829b..52bdb25 100755
+--- a/make-debs.sh
++++ b/make-debs.sh
+@@ -25,7 +25,7 @@ mkdir -p $releasedir
+ # remove all files not under git so they are not
+ # included in the distribution.
+ #
+-git clean -dxf
++#git clean -dxf
+ #
+ # git describe provides a version that is
+ # a) human readable
+@@ -65,7 +65,7 @@ perl -pi -e 's/--dbg-package.*//' ceph-$vers/debian/rules
+ # directory is included in the sources and the upstream version will
+ # change each time it is modified.
+ #
+-dvers="$vers-1"
++dvers="$vers-1trusty"
+ #
+ # update the changelog to match the desired version
+ #
+diff --git a/src/common/config_opts.h b/src/common/config_opts.h
+index 3795f0e..4242abd 100644
+--- a/src/common/config_opts.h
++++ b/src/common/config_opts.h
+@@ -1144,6 +1144,11 @@ OPTION(rados_mon_op_timeout, OPT_DOUBLE, 0) // how many seconds to wait for a re
+ OPTION(rados_osd_op_timeout, OPT_DOUBLE, 0) // how many seconds to wait for a response from osds before returning an error from a rados operation. 0 means no limit.
+ OPTION(rados_tracing, OPT_BOOL, false) // true if LTTng-UST tracepoints should be enabled
+ 
++OPTION(rbd_cache_volume_enable, OPT_BOOL, true)
++OPTION(rbd_cache_volume_enable_prefix, OPT_STR, "ssdcache")
++OPTION(rbd_cache_volume_name, OPT_STR, "cache_volume")
++OPTION(rbd_cache_volume_backend, OPT_STR, "hyperstash")
++
+ OPTION(rbd_op_threads, OPT_INT, 1)
+ OPTION(rbd_op_thread_timeout, OPT_INT, 60)
+ OPTION(rbd_non_blocking_aio, OPT_BOOL, true) // process AIO ops from a worker thread to prevent blocking
+diff --git a/src/common/dout.h b/src/common/dout.h
+index 9f8fd27..2aa3f69 100644
+--- a/src/common/dout.h
++++ b/src/common/dout.h
+@@ -78,7 +78,7 @@ public:
+ // NOTE: depend on magic value in _ASSERT_H so that we detect when
+ // /usr/include/assert.h clobbers our fancier version.
+ #define dendl std::flush;				\
+-  _ASSERT_H->_log->submit_entry(_dout_e);		\
++  _dout_cct->_log->submit_entry(_dout_e);		\
+     }						\
+   } while (0)
+ 
+diff --git a/src/include/rbd/librbd.h b/src/include/rbd/librbd.h
+index c636494..33582df 100644
+--- a/src/include/rbd/librbd.h
++++ b/src/include/rbd/librbd.h
+@@ -243,6 +243,8 @@ CEPH_RBD_API int rbd_mirror_image_status_summary(rados_ioctx_t io_ctx,
+ 
+ CEPH_RBD_API int rbd_open(rados_ioctx_t io, const char *name,
+                           rbd_image_t *image, const char *snap_name);
++CEPH_RBD_API int rbd_open_skip_cache(rados_ioctx_t io, const char *name,
++                          rbd_image_t *image, const char *snap_name);
+ 
+ CEPH_RBD_API int rbd_aio_open(rados_ioctx_t io, const char *name,
+ 			      rbd_image_t *image, const char *snap_name,
+diff --git a/src/librbd/CacheImageCtx.cc b/src/librbd/CacheImageCtx.cc
+new file mode 100644
+index 0000000..6d373f1
+--- /dev/null
++++ b/src/librbd/CacheImageCtx.cc
+@@ -0,0 +1,75 @@
++#include "librbd/AioCompletion.h"
++#include "librbd/ImageState.h"
++#include "librbd/CacheImageCtx.h"
++
++#define dout_subsys ceph_subsys_rbd
++#undef dout_prefix
++#define dout_prefix *_dout << "librbd::CacheImageCtx: "
++
++namespace librbd {
++
++struct sbc_io_unit{
++    Context* onfinish;
++    dslab::sbc_completion_t comp;
++    sbc_io_unit( Context* onfinish ):onfinish(onfinish){}
++    ~sbc_io_unit(){
++    }
++};
++
++static void _finish_sbc_aio(long int r, void *data){
++    sbc_io_unit* io_u = (sbc_io_unit*) data;
++    io_u->onfinish->complete(r);
++    dslab::sbc_aio_release( io_u->comp );
++    delete io_u;
++}
++
++CacheImageCtx::CacheImageCtx(const std::string &image_name,
++        const std::string &image_id, const char *snap,
++        const std::string &real_image_name, IoCtx& p,
++        bool read_only):ImageCtx(image_name, "", "", p, read_only){
++    this->cached_image_name = real_image_name;
++    this->is_cache_volume = true;
++    this->cache_inst = new dslab::libsbc(real_image_name.c_str());
++    ldout(cct, 1) << "Open CacheImage:" << image_name << dendl;
++    //this->cached_image_snap_name = snap;
++}
++
++void CacheImageCtx::delete_CacheImageCtx(){
++    delete cache_inst;
++}
++
++void CacheImageCtx::aio_write( AioCompletion *c,
++        uint64_t off, size_t len, const char *buf,
++        int op_flags ){
++    ldout(cct, 1) << "do aio_write off:" << off << " len:" << len << dendl;
++    c->init_time(this, librbd::AIO_TYPE_WRITE);
++    c->start_op();
++    c->get();
++    c->set_request_count(1);
++    C_AioRequest* onfinish = new C_AioRequest( c );
++    sbc_io_unit *io_u = new sbc_io_unit( onfinish );
++    dslab::sbc_aio_create_completion( (void*)io_u, _finish_sbc_aio, &(io_u->comp) );
++    cache_inst->sbc_aio_write(off, len, buf, io_u->comp);
++    c->put();
++    return;
++}
++
++void CacheImageCtx::aio_read( AioCompletion *c,
++        uint64_t off, size_t len, char *buf,
++        int op_flags ){
++    ldout(cct, 1) << "do aio_read off:" << off << " len:" << len << dendl;
++    c->init_time(this, librbd::AIO_TYPE_READ);
++    c->start_op();
++    c->get();
++    c->set_request_count(1);
++    C_AioRequest* onfinish = new C_AioRequest( c );
++    //todo: add check for backend,
++    //if not hyperstash, then use default aio_write
++    sbc_io_unit *io_u = new sbc_io_unit( onfinish );
++    dslab::sbc_aio_create_completion( (void*)io_u, _finish_sbc_aio, &(io_u->comp) );
++    cache_inst->sbc_aio_read(off, len, buf, io_u->comp);
++    c->put();
++    return;
++}
++}
++
+diff --git a/src/librbd/CacheImageCtx.h b/src/librbd/CacheImageCtx.h
+new file mode 100644
+index 0000000..6564b17
+--- /dev/null
++++ b/src/librbd/CacheImageCtx.h
+@@ -0,0 +1,40 @@
++#ifndef CEPH_LIBRBD_CACHEIMAGECTX_H
++#define CEPH_LIBRBD_CACHEIMAGECTX_H
++
++#include "librbd/ImageCtx.h"
++#include "librbd/AioCompletion.h"
++#include "sbc/libsbc.h"
++
++namespace librbd {
++/*class C_CacheVolumeRead : public C_AioRequest {
++public:
++    C_CacheVolumeRead( CephContext *cct, AioCompletion *completion, char* data, uint64_t off, size_t len )
++        : C_AioRequest(cct, completion), m_data(data), m_off(off), m_len(len){}
++    virtual ~C_CacheVolumeRead() {}
++    virtual void finish(int r);
++  private:
++    char* m_data;
++    uint64_t m_off;
++    size_t len;
++}*/
++
++struct CacheImageCtx : ImageCtx {
++    std::string cached_image_name;
++    dslab::libsbc* cache_inst;
++
++    CacheImageCtx(const std::string &image_name, const std::string &image_id,
++            const char *snap, const std::string &real_image_name, IoCtx& p, bool read_only);
++    void delete_CacheImageCtx();
++    void aio_write( AioCompletion *c,
++        uint64_t off, size_t len, const char *buf,
++        int op_flags );
++    void aio_read( AioCompletion *c,
++        uint64_t off, size_t len, char *buf,
++        int op_flags );
++
++
++};
++}
++
++
++#endif
+diff --git a/src/librbd/ImageCtx.cc b/src/librbd/ImageCtx.cc
+index 4226d42..09acc14 100644
+--- a/src/librbd/ImageCtx.cc
++++ b/src/librbd/ImageCtx.cc
+@@ -164,7 +164,7 @@ struct C_InvalidateCache : public Context {
+       order(0), size(0), features(0),
+       format_string(NULL),
+       id(image_id), parent(NULL),
+-      stripe_unit(0), stripe_count(0), flags(0),
++      stripe_unit(0), stripe_count(0), flags(0), is_cache_volume(false),
+       object_cacher(NULL), writeback_handler(NULL), object_set(NULL),
+       readahead(),
+       total_bytes_read(0),
+diff --git a/src/librbd/ImageCtx.h b/src/librbd/ImageCtx.h
+index b8a3bf6..3e28fa0 100644
+--- a/src/librbd/ImageCtx.h
++++ b/src/librbd/ImageCtx.h
+@@ -121,6 +121,7 @@ namespace librbd {
+     ImageCtx *parent;
+     uint64_t stripe_unit, stripe_count;
+     uint64_t flags;
++    bool is_cache_volume;
+ 
+     file_layout_t layout;
+ 
+diff --git a/src/librbd/ImageState.h b/src/librbd/ImageState.h
+index bad4277..f4cc61a 100644
+--- a/src/librbd/ImageState.h
++++ b/src/librbd/ImageState.h
+@@ -23,7 +23,7 @@ template <typename ImageCtxT = ImageCtx>
+ class ImageState {
+ public:
+   ImageState(ImageCtxT *image_ctx);
+-  ~ImageState();
++  virtual ~ImageState();
+ 
+   int open();
+   void open(Context *on_finish);
+diff --git a/src/librbd/Makefile.am b/src/librbd/Makefile.am
+index d6bc358..c1cd8cf 100644
+--- a/src/librbd/Makefile.am
++++ b/src/librbd/Makefile.am
+@@ -20,6 +20,9 @@ librbd_internal_la_SOURCES = \
+ 	librbd/DiffIterate.cc \
+ 	librbd/ExclusiveLock.cc \
+ 	librbd/ImageCtx.cc \
++	librbd/CacheImageCtx.cc \
++	librbd/SimpleBlockCacher.cpp \
++	librbd/libsbc.cpp \
+ 	librbd/ImageState.cc \
+ 	librbd/ImageWatcher.cc \
+ 	librbd/internal.cc \
+@@ -101,6 +104,7 @@ noinst_HEADERS += \
+ 	librbd/DiffIterate.h \
+ 	librbd/ExclusiveLock.h \
+ 	librbd/ImageCtx.h \
++	librbd/CacheImageCtx.h \
+ 	librbd/ImageState.h \
+ 	librbd/ImageWatcher.h \
+ 	librbd/internal.h \
+diff --git a/src/librbd/SimpleBlockCacher.cpp b/src/librbd/SimpleBlockCacher.cpp
+new file mode 100644
+index 0000000..8c8cc81
+--- /dev/null
++++ b/src/librbd/SimpleBlockCacher.cpp
+@@ -0,0 +1,641 @@
++// Copyright [2016] <Intel>
++
++#include "sbc/SimpleBlockCacher.h"
++
++namespace dslab {
++SimpleBlockCacher::SimpleBlockCacher(const char* volume_name){
++    go = true;
++    threads_count = 0;
++    config = new Config(volume_name);
++    log_path = config->configValues["log_to_file"];
++    if( log_path!="false" ){
++        stderr_no = dup(fileno(stderr));
++        log_fd = fopen( log_path.c_str(), "w" );
++        dup2(fileno(log_fd), STDERR_FILENO);
++    }
++
++    /* Initiate cacher structure */
++    m_volume_name = volume_name;
++    p_device_name = config->configValues["cache_dir_run"].c_str();
++    m_object_size = stoull(config->configValues["cache_min_alloc_size"]);
++    m_total_size = stoull(config->configValues["cache_total_size"]);
++    m_free_list_length = m_total_size/m_object_size;
++    p_free_node_head = p_free_node_tail = nullptr;
++    m_device_fd = -1;
++
++    init();
++
++    /*Initiate backend storage*/
++    backend_store = new BackendStore("dslab_scache");
++
++    /* Initiate flush/evict agent and threadpool*/
++    int scache_thread_max = stoi(config->configValues["cacheservice_threads_num"]);
++    scache_op_threads = new ThreadPool( scache_thread_max );
++    agent_threads = new ThreadPool(2);
++    cct.cache_flush_queue_depth = stoull(config->configValues["cache_flush_queue_depth"]);
++    cache_flush_ratio = stof(config->configValues["cache_flush_ratio"]);
++    cache_evict_ratio = stof(config->configValues["cache_evict_ratio"]);
++
++    agent_threads->schedule( std::bind( &SimpleBlockCacher::process, this ) );
++    agent_threads->schedule( std::bind( &SimpleBlockCacher::monitor, this ) );
++}
++
++SimpleBlockCacher::~SimpleBlockCacher() {
++    go = false;
++    /*flush then close*/
++    flush_all();
++    log_print("Cache has been flushed to Backend\n");
++
++    delete agent_threads;
++    delete scache_op_threads;
++
++    std::lock_guard<std::mutex> lock(free_node_list_lock);
++    free_node* tmp = p_free_node_head;
++    while (tmp) {
++        free_node* tmp_next = tmp->next;
++        delete tmp;
++        tmp = tmp_next;
++    }
++    close(m_device_fd);
++
++    delete backend_store;
++    delete config;
++    if( log_path!="false" ){
++        dup2( stderr_no, STDERR_FILENO );
++        fclose(log_fd);
++    }
++}
++
++int SimpleBlockCacher::aio_write(const char *buf, uint64_t offset, uint64_t length, void* comp){
++    Request* req = new Request( buf, offset, length, comp, REQ_WRITE );
++    request_queue.enqueue( req );
++    return 0;
++}
++
++int SimpleBlockCacher::aio_read(char *buf, uint64_t offset, uint64_t length, void *comp){
++    Request* req = new Request( buf, offset, length, comp, REQ_READ );
++    request_queue.enqueue( req );
++    return 0;
++}
++
++int SimpleBlockCacher::aio_flush(void *comp){
++    Request* req = new Request( 0, 0, 0, comp, REQ_FLUSH );
++    request_queue.enqueue( req );
++    return 0;
++}
++
++int SimpleBlockCacher::write(const char *buf, uint64_t offset, uint64_t length, std::time_t req_ts) {
++    uint64_t cache_entry_id = offset;
++    uint64_t off_by_entry = offset % m_object_size;
++    assert( (off_by_entry + length) <= m_object_size );
++    BLOCK_INDEX::iterator it = m_meta_tbl_lookup( cache_entry_id );
++
++    BLOCK* entry = it->second;
++    WriteLock *cache_entry_w_lock = new WriteLock(entry->rwlock);
++
++    int64_t block_id = 0;
++    ssize_t ret = 0;
++    bool append_write = false;
++
++    if(entry->on_disk_index != -1 && length < m_object_size){
++        /*write in place*/
++        block_id = entry->on_disk_index;
++    }else{
++        /*Skip old write request*/
++        block_id = free_lookup();
++        if(block_id >= 0) append_write = true;
++        else{
++            /*unable to find free space, do evict?*/
++            evict_all_clean();
++            block_id = free_lookup();
++            if(block_id >= 0) append_write = true;
++            else{
++                /* still no space, do write around */
++                if( entry->on_disk_index == -1 ){
++                    ret = backend_store->write( m_volume_name, offset, length, buf );
++                    if(ret < 0){
++                        log_print("No space on cache, write around to backend failed. Details: %s\n", std::strerror(ret));
++                    }else{
++                        //log_print("No space on cache, write around to backend succeed.\n");
++                    }
++                    delete cache_entry_w_lock;
++                    return ret;
++                }else{
++                    block_id = entry->on_disk_index;
++                }
++            }
++        }
++    }
++    delete cache_entry_w_lock;
++    //printf("cache_entry_id = %lu, expect block id = %lu, current block id:%lu\n", cache_entry_id, block_id, entry->on_disk_index);
++    ret = do_write( block_id, buf, off_by_entry, length );
++    /* update meta */
++    if( ret >= 0 ){
++        WriteLock *cache_entry_w_lock_2 = new WriteLock(entry->rwlock);
++        if( req_ts < entry->ts_write ){
++            /* this request is a late request */
++            if( append_write ){
++                return_to_free( block_id );
++            }
++            delete cache_entry_w_lock_2;
++            return 0;
++        }
++        entry->fresh_ts_write( req_ts );
++        if( append_write ){
++            /* write a new block, return old block */
++            return_to_free( entry->on_disk_index );
++        }
++        entry->set_on_disk_index(block_id);
++        entry->set_on_volume_offset(offset);
++        entry->set_cache_dirty();
++        cct.lru_dirty->touch_key( (LRU_ITEM_TYPE)entry );
++        cct.lru_clean->remove( (LRU_ITEM_TYPE)entry );
++        delete cache_entry_w_lock_2;
++    }else{
++        if( append_write ){
++            /*write did't complete, return space*/
++            return_to_free(block_id);
++        }
++    }
++    return ret;
++}
++
++ssize_t SimpleBlockCacher::read(char *buf, uint64_t offset, uint64_t length, std::time_t req_ts) {
++    uint64_t cache_entry_id = offset;
++    uint64_t off_by_entry = offset % m_object_size;
++    assert( (off_by_entry + length) <= m_object_size );
++    BLOCK_INDEX::iterator it = m_meta_tbl_lookup( cache_entry_id );
++
++    BLOCK* entry = it->second;
++    int64_t block_id = 0;
++
++    int ret = 0;
++    if(entry->on_disk_index != -1){
++        ReadLock cache_entry_r_lock(entry->rwlock);
++        block_id = entry->on_disk_index;
++        ret = do_read( block_id, buf, off_by_entry, length );
++    }else{
++        /*do Promote*/
++        ret = backend_store->read(m_volume_name, offset, length, buf);
++        block_id = free_lookup();
++        if (block_id >= 0){
++            if( ret == 0 ){
++                ret = do_write( block_id, buf, off_by_entry, length );
++            }
++        }
++    }
++
++    /* update meta */
++    if( ret >= 0 && block_id >= 0 ){
++        if(entry->on_disk_index == -1){
++            WriteLock cache_entry_w_lock(entry->rwlock);
++            entry->set_on_disk_index(block_id);
++            entry->set_on_volume_offset(offset);
++        }
++        if(entry->if_clean){
++            cct.lru_clean->touch_key( (LRU_ITEM_TYPE)entry );
++        }else{
++            cct.lru_dirty->touch_key( (LRU_ITEM_TYPE)entry );
++        }
++    }else if(ret < 0){
++        if(entry->on_disk_index == -1 && block_id >= 0)
++            return_to_free(block_id);
++    }
++    return ret;
++}
++
++void SimpleBlockCacher::process(){
++    uint64_t left = 0;
++    uint64_t offset = 0;
++    uint64_t length = 0;
++    uint64_t offset_by_data = 0;
++    while(go){
++        Request *req = (Request*)request_queue.dequeue();
++        if(req){
++            if(req->io_type == REQ_FLUSH){
++                //scache_op_threads->schedule( std::bind( &SimpleBlockCacher::do_op, this, req, 0, 0, 0 ) );
++                flush_all();
++                continue;
++            }
++            /*map req to object size*/
++            left = req->length;
++            offset = req->offset;
++            offset_by_data = 0;
++            while(left){
++                length = (m_object_size - offset % m_object_size)<left?(m_object_size - offset % m_object_size):left;
++                left -= length;
++                req->uncomplete_count_inc();
++                if(left == 0) req->set_submit_complete();
++                map_request_to_cache_entry(req, offset, length, offset_by_data);
++                offset += length;
++                offset_by_data += length;
++            }
++        }
++    }
++}
++
++void SimpleBlockCacher::map_request_to_cache_entry( Request* req, uint64_t offset, uint64_t length,
++                                                    uint64_t data_off ){
++    uint64_t cache_entry_id = offset;
++    uint64_t off_by_entry = offset % m_object_size;
++    assert( (off_by_entry + length) <= m_object_size );
++    BLOCK_INDEX::iterator it = m_meta_tbl_lookup( cache_entry_id );
++
++    BLOCK* entry = it->second;
++    Op *op = new Op( offset, length, data_off, req );
++    WriteLock cache_entry_w_lock(entry->rwlock);
++    entry->pend_request((void*)op);
++    if(!entry->process_inflight){
++        entry->set_process_inflight(true);
++        scache_op_threads->schedule(boost::bind(&SimpleBlockCacher::handle_request, this, entry));
++    }
++}
++
++void SimpleBlockCacher::handle_request( BLOCK* entry ){
++    threads_count++;
++    //std::cout << threads_count << " threads are onflight\n";
++    uint16_t pending_request_size = 0;
++    REQUEST_P* req_chain;
++    WriteLock *cache_entry_w_lock_1 = nullptr;
++    WriteLock *cache_entry_w_lock;
++    while(entry->pending_req.size()){
++        if(cache_entry_w_lock_1 != nullptr){
++            delete cache_entry_w_lock_1;
++        }
++        cache_entry_w_lock = new WriteLock(entry->rwlock);
++        pending_request_size = entry->pending_req.size();
++        req_chain = new REQUEST_P[pending_request_size+1]();
++        for(uint16_t i = 0; i < pending_request_size; i++){
++            req_chain[i] = (REQUEST_P)entry->pending_req.dequeue();
++        }
++        delete cache_entry_w_lock;
++
++        /*optimization here*/
++        bool write_after = false;
++        for(int16_t i = pending_request_size-1; i >= 0; i--){
++            if(req_chain[i]->req->io_type == REQ_READ) write_after = false;
++            if(write_after) req_chain[i]->set_hint();
++            if(req_chain[i]->req->io_type == REQ_WRITE) write_after = true;
++        }
++        for(uint16_t i = 0; i < pending_request_size; i++){
++            REQUEST_P op = req_chain[i];
++            do_op(op->req, op->offset, op->length, op->data_off, op->hint);
++            delete op;
++        }
++        delete req_chain;
++        cache_entry_w_lock_1 = new WriteLock(entry->rwlock);
++    }
++    entry->set_process_inflight(false);
++    delete cache_entry_w_lock_1;
++    threads_count--;
++    //std::cout << threads_count << " threads are onflight\n";
++}
++
++void SimpleBlockCacher::do_op( Request* req, uint64_t offset, uint64_t length, uint64_t data_off, bool hint ){
++    ssize_t ret = 0;
++    //printf("req: %lu, offset: %lu, length: %lu, data_off:%lu\n", req->offset, offset, length, data_off);
++    if( !hint ){
++        switch(req->io_type){
++            case REQ_READ:
++                ret = read( &req->read_data[data_off], offset, length, req->ts );
++                break;
++            case REQ_WRITE:
++                ret = write( &req->write_data[data_off], offset, length, req->ts );
++                break;
++        }
++    }
++    req->update_status(ret);
++    if(req->may_complete())
++        delete req;
++}
++
++void SimpleBlockCacher::monitor(){
++    while( go ) {
++        flush_by_ratio(cache_flush_ratio);
++        evict_by_ratio(cache_evict_ratio);
++        sleep( 1 );
++    }
++}
++
++BLOCK_INDEX::iterator SimpleBlockCacher::m_meta_tbl_lookup( uint64_t cache_entry_id ){
++    /* lock on m_meta_tbl */
++    m_meta_tbl_lock.lock();
++    auto it = m_meta_tbl.find(cache_entry_id);
++    if( it == m_meta_tbl.end() ){
++        std::pair<BLOCK_INDEX::iterator,bool> ret;
++        BLOCK *block = new BLOCK();
++        ret = m_meta_tbl.insert(std::make_pair(cache_entry_id, block));
++        if( ret.second ){
++            it = ret.first;
++        }else{
++            m_meta_tbl_lock.unlock();
++            assert(0);
++        }
++    }
++    m_meta_tbl_lock.unlock();
++    return it;
++
++}
++
++bool SimpleBlockCacher::init() {
++    // TODO(yuan): handle malloc fail
++    p_free_node_head = new free_node();
++    free_node* tmp = p_free_node_head;
++    for (uint64_t i = 0 ; i < m_free_list_length; i++) {
++        tmp->index = i;
++        if (i < (m_free_list_length - 1)) {
++            free_node* next_tmp = new free_node();
++            tmp->next = next_tmp;
++            tmp = tmp->next;
++        } else {
++            tmp->next = nullptr;
++        }
++    }
++    p_free_node_tail = tmp;
++    if (p_free_node_tail->next != nullptr) {
++        log_err("[ERROR] SimpleBlockCacher::init, unable to initialize free node\n");
++        return false;
++    }
++    // assert(p_free_node_tail->next == nullptr);
++
++    m_device_fd = open(p_device_name);
++
++    if (m_device_fd < 0) {
++        log_err("[ERROR] SimpleBlockCacher::init, unable to open %s,"
++                 "error code: %s \n", p_device_name, std::strerror(m_device_fd));
++        return false;
++    }
++    return true;
++}
++
++int SimpleBlockCacher::open(const char* device_name) {
++    int mode = O_CREAT | O_RDWR | O_SYNC, permission = S_IRUSR | S_IWUSR;
++    int fd = ::open(device_name, mode, permission);
++    if (fd <= 0) {
++        log_err("[ERROR] SimpleBlockCacher::SimpleBlockCacher, "
++                 "unable to open %s, error code: %s \n", device_name, std::strerror(fd));
++        close(fd);
++        return fd;
++    }
++
++    struct stat file_st;
++    memset(&file_st, 0, sizeof(file_st));
++    fstat(fd, &file_st);
++    if (file_st.st_size < off_t(m_total_size)) {
++        if (-1 == ftruncate(fd, m_total_size)) {
++            close(fd);
++            return fd;
++        }
++    }
++
++    return fd;
++}
++
++int SimpleBlockCacher::close(int block_fd) {
++    int ret = ::close(block_fd);
++    if (ret < 0) {
++        log_err("[ERROR] SimpleBlockCacher::SimpleBlockCacher, "
++                 "close block_fd failed, errno: %s\n", std::strerror(ret));
++        return ret;
++    }
++    return ret;
++}
++
++int64_t SimpleBlockCacher::free_lookup() {
++    std::lock_guard<std::mutex> lock(free_node_list_lock);
++    int64_t free_idx = -1;
++    if (p_free_node_head != nullptr) {
++        free_node* this_node = p_free_node_head;
++        free_idx = this_node->index;
++        if(p_free_node_tail == p_free_node_head) p_free_node_tail = nullptr;
++        p_free_node_head = this_node->next;
++        delete this_node;
++    } else {
++        //log_print("SimpleBlockCacher::free_lookup can't find free node\n");
++    }
++
++    return free_idx;
++}
++
++void SimpleBlockCacher::return_to_free(uint64_t block_id) {
++    std::lock_guard<std::mutex> lock(free_node_list_lock);
++    free_node* new_free_node = new free_node();
++    new_free_node->index = block_id;
++    new_free_node->next = nullptr;
++    if(p_free_node_tail != nullptr) p_free_node_tail->next = new_free_node;
++    p_free_node_tail = new_free_node;
++    if(p_free_node_head == nullptr) p_free_node_head = new_free_node;
++}
++
++int SimpleBlockCacher::do_write(uint64_t block_id,
++                                const char* buf,
++                                uint64_t offset_by_entry,
++                                uint64_t length) {
++    int ret;
++    uint64_t ondisk_idx = offset_by_entry + block_id * m_object_size;
++    ret = ::pwrite(m_device_fd, buf, length, ondisk_idx);
++    //ret = 0;
++    if (ret < 0) {
++        log_err("[ERROR] SimpleBlockCacher::write_fd, "
++                "unable to write data, block_id: %lu\n", block_id);
++        return -1;
++    }
++    posix_fadvise(m_device_fd, ondisk_idx, length, POSIX_FADV_DONTNEED);
++
++    return ret;
++}
++
++int SimpleBlockCacher::do_read(uint64_t block_id,
++                                char* buf,
++                                uint64_t offset_by_entry,
++                                uint64_t length) {
++    int ret;
++    uint64_t ondisk_idx;
++
++    ondisk_idx = block_id * m_object_size + offset_by_entry;
++    ret = ::pread(m_device_fd, buf, length, ondisk_idx);
++    if (ret < 0) {
++        log_err("[ERROR] SimpleBlockCacher::read_fd, "
++                "unable to read data, block_id: %lu, errorno: %s\n", block_id, std::strerror(ret));
++        return -1;
++    }
++    posix_fadvise(m_device_fd, ondisk_idx, length, POSIX_FADV_DONTNEED);
++    return ret;
++}
++
++void SimpleBlockCacher::do_evict(uint64_t cache_name) {
++    m_meta_tbl_lock.lock();
++    const typename BLOCK_INDEX::iterator it = m_meta_tbl.find(cache_name);
++    if (it != m_meta_tbl.end()) {
++        do_evict(it->second);
++    }
++    m_meta_tbl_lock.unlock();
++}
++
++void SimpleBlockCacher::do_evict( BLOCK* c_entry, bool lock_already ){
++    if(!lock_already){
++        WriteLock cache_entry_w_lock(c_entry->rwlock, boost::defer_lock);
++        if( !cache_entry_w_lock.try_lock() ) return;
++    }
++    if( c_entry->on_disk_index == -1 ){
++        return;
++    }
++    if( !c_entry->if_clean ){
++        return;
++    }
++    if( c_entry->inflight_flush ){
++        return;
++    }
++    /*return block to free_list*/
++    //std::cout << c_entry << "do evict" << std::endl;
++    return_to_free(c_entry->on_disk_index);
++    c_entry->reset();
++    cct.lru_clean->remove( (LRU_ITEM_TYPE)c_entry );
++}
++
++void SimpleBlockCacher::evict( BLOCK_P* c_entry_list ){
++    uint64_t i = 0;
++    for(;c_entry_list[i]!=0; i++){
++        BLOCK* c_entry = c_entry_list[i];
++        do_evict(c_entry);
++    }
++    return;
++}
++
++void SimpleBlockCacher::evict_by_ratio(float target_ratio) {
++    uint64_t dirty_block_count = cct.lru_dirty->get_length();
++    uint64_t clean_block_count = cct.lru_clean->get_length();
++    uint64_t total_cached_block = dirty_block_count + clean_block_count;
++    uint64_t total_block_count = m_total_size / m_object_size;
++
++    log_print("Total Cache Ratio: %.2f %%, dirty ratio %.2f %%\n", ( 100.0 * total_cached_block/total_block_count ), ( 100.0 * dirty_block_count/total_block_count ));
++    if( ( 1.0 * total_cached_block/total_block_count ) < target_ratio ){
++        return;
++    } else {
++        log_print("Start Evict\n");
++        uint64_t need_to_evict_count = total_cached_block - total_block_count * target_ratio;
++        if(need_to_evict_count > clean_block_count){
++            flush_by_ratio( target_ratio );
++        }
++        BLOCK_P* c_entry_list = new BLOCK_P[need_to_evict_count+1]();
++        cct.lru_clean->get_keys( (LRU_ITEM_TYPE*)c_entry_list, need_to_evict_count, false );
++        evict( c_entry_list );
++        delete c_entry_list;
++    }
++    return;
++}
++
++void SimpleBlockCacher::evict_all_clean(){
++    std::lock_guard<std::mutex> lock(evict_mutex);
++
++    uint64_t need_to_evict_count = cct.lru_clean->get_length();
++    //log_print("LRU_CLEAN size: %ld \n", need_to_evict_count);
++    BLOCK_P* c_entry_list = new BLOCK_P[need_to_evict_count+1]();
++    cct.lru_clean->get_keys( (LRU_ITEM_TYPE*)c_entry_list, need_to_evict_count, false );
++    evict( c_entry_list );
++    delete c_entry_list;
++    //log_print("after evict LRU_CLEAN size: %ld \n", cct.lru_clean->get_length());
++}
++
++void SimpleBlockCacher::do_flush( BLOCK* c_entry ){
++
++    ReadLock cache_entry_r_lock(c_entry->rwlock);
++    if( c_entry->on_disk_index == -1 ){
++        return;
++    }
++
++    if(c_entry->if_clean){
++        //the c_entry is still pending for flush completion.
++        return;
++    }
++
++    if(c_entry->inflight_flush){
++        //the c_entry is still pending for flush completion.
++        return;
++    }
++
++    c_entry->fresh_ts_flush();
++    char* data_from_cache = new char[m_object_size]();
++    uint64_t offset_by_cache_entry = 0;
++    ssize_t ret = do_read( c_entry->on_disk_index, data_from_cache, offset_by_cache_entry, m_object_size );
++    if(ret < 0){
++        log_err( "flush read_from_cache failed.Details: %s\n", std::strerror(ret) );
++        delete data_from_cache;
++        return;
++    }
++
++    C_AioBackendCompletion *onfinish = new C_AioBackendWrite( &cct, c_entry, data_from_cache );
++    ret = backend_store->aio_write( m_volume_name, c_entry->on_volume_offset, m_object_size, data_from_cache, onfinish );
++    if(ret < 0){
++        onfinish->finish( ret );
++        log_print("flush write_to_backend failed. Details: %s\n", std::strerror(ret));
++        delete onfinish;
++    }else{
++        cct.flush_op_count++;
++    }
++}
++
++void SimpleBlockCacher::flush( BLOCK** c_entry_list ){
++    //sort c_entry by offset
++    std::map<uint64_t, BLOCK*> tmp_sort;
++    uint64_t total_need_flush = 0;
++    for(; c_entry_list[total_need_flush]; total_need_flush++){
++        if ( c_entry_list[total_need_flush]->on_disk_index >= 0 ) {
++            tmp_sort.insert( std::make_pair( c_entry_list[total_need_flush]->on_volume_offset, c_entry_list[total_need_flush] ) );
++        }
++    }
++
++    uint64_t completed_flush = 0;
++    uint8_t completed_flush_ratio = 0;
++
++    log_print("flush start\n");
++    log_print("flush waiting %lu c_entry finish doing flush\n", total_need_flush);
++
++    //for(uint64_t i = 0; c_entry_list_sort[i]!=0; i++){
++    for( std::map<uint64_t, BLOCK*>::iterator it = tmp_sort.begin(); it!=tmp_sort.end(); it++ ){
++        if( completed_flush * 100 / total_need_flush > completed_flush_ratio ) {
++            completed_flush_ratio++;
++            log_print("flush completed ratio=%ld %%\n", completed_flush*100/total_need_flush);
++        }
++
++        while(cct.flush_op_count >= cct.cache_flush_queue_depth){
++            std::unique_lock<std::mutex> flush_qd_scoped_lock(flush_qd_mutex);
++            cct.flush_qd_cond.wait_for(flush_qd_scoped_lock, std::chrono::milliseconds(1000));
++        }
++
++        BLOCK* c_entry = it->second;
++
++        do_flush( c_entry );
++
++        completed_flush++;
++    }
++    tmp_sort.clear();
++    log_print("flush complete\n");
++    return;
++}
++
++void SimpleBlockCacher::flush_by_ratio( float target_ratio ){
++    uint64_t dirty_block_count = cct.lru_dirty->get_length();
++    uint64_t total_block_count = m_total_size / m_object_size;
++
++    if( ( 1.0 * dirty_block_count/total_block_count ) < target_ratio ){
++        return;
++    } else {
++        uint64_t need_to_flush_count = dirty_block_count - total_block_count * target_ratio;
++        BLOCK_P* c_entry_list = new BLOCK_P[need_to_flush_count+1]();
++        cct.lru_dirty->get_keys( (LRU_ITEM_TYPE*)c_entry_list, need_to_flush_count, false );
++        flush( c_entry_list );
++        delete c_entry_list;
++    }
++    while( cct.flush_op_count > 0 ) {
++        std::unique_lock<std::mutex> flush_stop_scoped_lock(flush_stop_mutex);
++        cct.flush_stop_cond.wait_for(flush_stop_scoped_lock, std::chrono::milliseconds(1000));
++    }
++    return;
++}
++
++void SimpleBlockCacher::flush_all(){
++    return flush_by_ratio(0);
++}
++
++}  //  namespace dslab
+diff --git a/src/librbd/internal.cc b/src/librbd/internal.cc
+index 073be35..2e947a1 100644
+--- a/src/librbd/internal.cc
++++ b/src/librbd/internal.cc
+@@ -1294,11 +1294,23 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+     uint64_t order = 0;
+     opts.get(RBD_IMAGE_OPTION_ORDER, &order);
+ 
++    std::string prefix = cct->_conf->rbd_cache_volume_enable_prefix;
++    std::string image_name(imgname);
++
++    bool cache_volume = cct->_conf->rbd_cache_volume_enable && (0 == image_name.compare(0, prefix.size(), prefix));
++
++    std::string cache_volume_name("");
++    std::string cache_volume_backend("");
++    if(cache_volume){
++        cache_volume_name = cct->_conf->rbd_cache_volume_name + "_" + imgname;
++        cache_volume_backend = cct->_conf->rbd_cache_volume_backend;
++    }
+     ldout(cct, 20) << "create " << &io_ctx << " name = " << imgname
+ 		   << " size = " << size << " old_format = " << old_format
+ 		   << " features = " << features << " order = " << order
+ 		   << " stripe_unit = " << stripe_unit
+ 		   << " stripe_count = " << stripe_count
++           << " cache_volume = " << cache_volume_name
+ 		   << dendl;
+ 
+     if (features & ~RBD_FEATURES_ALL) {
+@@ -1369,6 +1381,14 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+ 		    stripe_count, journal_order, journal_splay_width,
+                     journal_pool, non_primary_global_image_id,
+                     primary_mirror_uuid);
++
++      //create cache_volume
++      if( cache_volume ){
++          r = create_v2(io_ctx, cache_volume_name.c_str(), bid, size, order, features, stripe_unit,
++		    stripe_count, journal_order, journal_splay_width,
++                    journal_pool, non_primary_global_image_id,
++                    primary_mirror_uuid);
++      }
+     }
+ 
+     int r1 = opts.set(RBD_IMAGE_OPTION_ORDER, order);
+@@ -2309,7 +2329,7 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+       return r;
+ 
+     RWLock::RLocker l(ictx->snap_lock);
+-    *exists = ictx->get_snap_id(snap_name) != CEPH_NOSNAP; 
++    *exists = ictx->get_snap_id(snap_name) != CEPH_NOSNAP;
+     return 0;
+   }
+ 
+@@ -3712,7 +3732,7 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+ 	 ++p) {
+       total_bytes += p->second;
+     }
+-    
++
+     ictx->md_lock.get_write();
+     bool abort = ictx->readahead_disable_after_bytes != 0 &&
+       ictx->total_bytes_read > ictx->readahead_disable_after_bytes;
+@@ -3725,7 +3745,7 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+     uint64_t image_size = ictx->get_image_size(ictx->snap_id);
+     ictx->snap_lock.put_read();
+     ictx->md_lock.put_write();
+-    
++
+     pair<uint64_t, uint64_t> readahead_extent = ictx->readahead.update(image_extents, image_size);
+     uint64_t readahead_offset = readahead_extent.first;
+     uint64_t readahead_length = readahead_extent.second;
+diff --git a/src/librbd/librbd.cc b/src/librbd/librbd.cc
+index 2d6d80c..de0e108 100644
+--- a/src/librbd/librbd.cc
++++ b/src/librbd/librbd.cc
+@@ -1,4 +1,4 @@
+-// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
++// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+ // vim: ts=8 sw=2 smarttab
+ /*
+  * Ceph - scalable distributed file system
+@@ -24,6 +24,7 @@
+ #include "librbd/AioImageRequestWQ.h"
+ #include "cls/rbd/cls_rbd_client.h"
+ #include "librbd/ImageCtx.h"
++#include "librbd/CacheImageCtx.h"
+ #include "librbd/ImageState.h"
+ #include "librbd/internal.h"
+ #include "librbd/Operations.h"
+@@ -1703,6 +1704,10 @@ extern "C" int rbd_remove(rados_ioctx_t p, const char *name)
+   tracepoint(librbd, remove_enter, io_ctx.get_pool_name().c_str(), io_ctx.get_id(), name);
+   librbd::NoOpProgressContext prog_ctx;
+   int r = librbd::remove(io_ctx, name, "", prog_ctx);
++  CephContext *cct = (CephContext* )io_ctx.cct();
++  string cache_volume_name = cct->_conf->rbd_cache_volume_name + "_" + name;
++  //TODO: should return failure on cache volume delete
++  int r1 = librbd::remove(io_ctx, cache_volume_name.c_str(), "", prog_ctx);
+   tracepoint(librbd, remove_exit, r);
+   return r;
+ }
+@@ -1841,8 +1846,41 @@ extern "C" int rbd_open(rados_ioctx_t p, const char *name, rbd_image_t *image,
+   librados::IoCtx io_ctx;
+   librados::IoCtx::from_rados_ioctx_t(p, io_ctx);
+   TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
+-  librbd::ImageCtx *ictx = new librbd::ImageCtx(name, "", snap_name, io_ctx,
+-						false);
++  //if this image has cache volume,
++  //should open cache_volume instead,
++  //and give read cache name to cache_volume
++  CephContext *cct = (CephContext* )io_ctx.cct();
++  librbd::ImageCtx *ictx;
++  std::string prefix = cct->_conf->rbd_cache_volume_enable_prefix;
++  std::string image_name(name);
++  bool cache_volume = cct->_conf->rbd_cache_volume_enable && (0 == image_name.compare(0, prefix.size(), prefix));
++  if(cache_volume) {
++    string cache_volume_name = cct->_conf->rbd_cache_volume_name + "_" + name;
++    ictx = new librbd::CacheImageCtx(cache_volume_name,
++            "", snap_name, name, io_ctx, false);
++  } else {
++    ictx = new librbd::ImageCtx(name, "", snap_name, io_ctx, false);
++  }
++  tracepoint(librbd, open_image_enter, ictx, ictx->name.c_str(), ictx->id.c_str(), ictx->snap_name.c_str(), ictx->read_only);
++
++  int r = ictx->state->open();
++  if (r < 0) {
++    delete ictx;
++  } else {
++    *image = (rbd_image_t)ictx;
++  }
++  tracepoint(librbd, open_image_exit, r);
++  return r;
++}
++
++extern "C" int rbd_open_skip_cache(rados_ioctx_t p, const char *name,
++				  rbd_image_t *image, const char *snap_name)
++{
++  librados::IoCtx io_ctx;
++  librados::IoCtx::from_rados_ioctx_t(p, io_ctx);
++  TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
++  librbd::ImageCtx *ictx = new librbd::ImageCtx(name, "", snap_name, io_ctx, false);
++
+   tracepoint(librbd, open_image_enter, ictx, ictx->name.c_str(), ictx->id.c_str(), ictx->snap_name.c_str(), ictx->read_only);
+ 
+   int r = ictx->state->open();
+@@ -1910,10 +1948,15 @@ extern "C" int rbd_aio_open_read_only(rados_ioctx_t p, const char *name,
+ extern "C" int rbd_close(rbd_image_t image)
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
++  int r;
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx* cache_ctx = (librbd::CacheImageCtx *)image;
++      cache_ctx->delete_CacheImageCtx();
++      r = cache_ctx->state->close();
++      return r;
++  }
+   tracepoint(librbd, close_image_enter, ictx, ictx->name.c_str(), ictx->id.c_str());
+-
+-  int r = ictx->state->close();
+-
++  r = ictx->state->close();
+   tracepoint(librbd, close_image_exit, r);
+   return r;
+ }
+@@ -1933,7 +1976,21 @@ extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   tracepoint(librbd, resize_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, size);
+   librbd::NoOpProgressContext prog_ctx;
+-  int r = ictx->operations->resize(size, prog_ctx);
++  int r = -1;
++  if (ictx->is_cache_volume) {
++      r = ictx->operations->resize(size, prog_ctx);
++      librbd::CacheImageCtx *cache_ictx = (librbd::CacheImageCtx *)ictx;
++      ictx = new librbd::ImageCtx(cache_ictx->cached_image_name, "", cache_ictx->snap_name.c_str(), cache_ictx->data_ctx, cache_ictx->read_only);
++      r = ictx->state->open();
++      if(r == 0){
++          r = ictx->operations->resize(size, prog_ctx);
++          r = ictx->state->close();
++      }else{
++          delete ictx;
++      }
++  }else{
++      r = ictx->operations->resize(size, prog_ctx);
++  }
+   tracepoint(librbd, resize_exit, r);
+   return r;
+ }
+@@ -1954,7 +2011,20 @@ extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   tracepoint(librbd, stat_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only);
+-  int r = librbd::info(ictx, *info, infosize);
++  int r;
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx *cache_ictx = (librbd::CacheImageCtx *)ictx;
++      ictx = new librbd::ImageCtx(cache_ictx->cached_image_name, "", cache_ictx->snap_name.c_str(), cache_ictx->data_ctx, cache_ictx->read_only);
++      r = ictx->state->open();
++      if( r == 0 ){
++          r = librbd::info(ictx, *info, infosize);
++          r = ictx->state->close();
++      }else{
++          delete ictx;
++      }
++  }else{
++      r = librbd::info(ictx, *info, infosize);
++  }
+   tracepoint(librbd, stat_exit, r, info);
+   return r;
+ }
+@@ -2538,11 +2608,17 @@ extern "C" int rbd_aio_create_completion(void *cb_arg,
+ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len,
+ 			     const char *buf, rbd_completion_t c)
+ {
+-  librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
++
+   librbd::RBD::AioCompletion *comp = (librbd::RBD::AioCompletion *)c;
+-  tracepoint(librbd, aio_write_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
+-  ictx->aio_work_queue->aio_write(get_aio_completion(comp), off, len, buf, 0);
+-  tracepoint(librbd, aio_write_exit, 0);
++  librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx *cache_ctx = (librbd::CacheImageCtx *)image;
++      cache_ctx->aio_write( get_aio_completion(comp), off, len, buf, 0 );
++  }else{
++      tracepoint(librbd, aio_write_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
++     ictx->aio_work_queue->aio_write(get_aio_completion(comp), off, len, buf, 0);
++     tracepoint(librbd, aio_write_exit, 0);
++  }
+   return 0;
+ }
+ 
+@@ -2576,10 +2652,15 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len,
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   librbd::RBD::AioCompletion *comp = (librbd::RBD::AioCompletion *)c;
+-  tracepoint(librbd, aio_read_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
+-  ictx->aio_work_queue->aio_read(get_aio_completion(comp), off, len, buf, NULL,
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx *cache_ctx = (librbd::CacheImageCtx *)image;
++      cache_ctx->aio_read( get_aio_completion(comp), off, len, buf, 0 );
++  }else{
++      tracepoint(librbd, aio_read_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
++      ictx->aio_work_queue->aio_read(get_aio_completion(comp), off, len, buf, NULL,
+                                  0);
+-  tracepoint(librbd, aio_read_exit, 0);
++      tracepoint(librbd, aio_read_exit, 0);
++  }
+   return 0;
+ }
+ 
+diff --git a/src/librbd/libsbc.cpp b/src/librbd/libsbc.cpp
+new file mode 100644
+index 0000000..6ffbb62
+--- /dev/null
++++ b/src/librbd/libsbc.cpp
+@@ -0,0 +1,54 @@
++#include "sbc/libsbc.h"
++
++namespace dslab {
++
++libsbc::libsbc(const char* rbd_name) {
++    volume_name = new char[strlen(rbd_name)+1]();
++    memcpy(volume_name, rbd_name, strlen(rbd_name));
++    sbc = new SimpleBlockCacher(volume_name);
++}
++
++libsbc::~libsbc() {
++    if (sbc)
++        delete sbc;
++    delete volume_name;
++}
++
++int libsbc::sbc_aio_read( uint64_t offset, uint64_t length, char* data, sbc_completion_t c ){
++    sbc->aio_read( data, offset, length, (void*)c );
++    return 0;
++}
++
++int libsbc::sbc_aio_write( uint64_t offset, uint64_t length, const char* data, sbc_completion_t c ){
++    sbc->aio_write( data, offset, length, (void*)c );
++    return 0;
++}
++
++int libsbc::sbc_aio_flush( sbc_completion_t c ){
++    sbc->aio_flush( (void*)c );
++    return 0;
++}
++
++int libsbc::sbc_flush()
++{
++    sbc->flush_all();
++    return 0;
++}
++
++int libsbc::sbc_discard(uint64_t offset, uint64_t length)
++{
++    sbc->do_evict(offset);
++    return 0;
++}
++
++int libsbc::sbc_read( uint64_t offset, uint64_t length, char* data ){
++    ssize_t ret = sbc->read( data, offset, length, std::time(nullptr) );
++    return ret;
++}
++
++int libsbc::sbc_write( uint64_t offset, uint64_t length, const char* data ){
++    ssize_t ret = sbc->write( data, offset, length, std::time(nullptr) );
++    return ret;
++}
++
++}
+diff --git a/src/librbd/sbc/SimpleBlockCacher.h b/src/librbd/sbc/SimpleBlockCacher.h
+new file mode 100644
+index 0000000..199e08b
+--- /dev/null
++++ b/src/librbd/sbc/SimpleBlockCacher.h
+@@ -0,0 +1,334 @@
++// Copyright [2016] <Intel>
++
++#ifndef SCACHE_SIMPLEBLOCKCACHER_H_
++#define SCACHE_SIMPLEBLOCKCACHER_H_
++
++#include "common.h"
++
++#include <fcntl.h>
++#include <sys/types.h>
++#include <sys/stat.h>
++#include <stdint.h>
++#include <stdlib.h>
++#include <unistd.h>
++#include <string.h>
++#include <assert.h>
++#include <atomic>
++#include <mutex>
++#include <unordered_map>
++#include <utility>
++#include <set>
++#include <cstring>
++#include <cerrno>
++#include <iostream>
++#include <chrono>
++#include <condition_variable>
++
++#define REQ_READ  0XFFF1
++#define REQ_WRITE 0XFFF2
++#define REQ_FLUSH 0XFFF3
++
++namespace dslab {
++typedef void *completion_t;
++typedef void (*callback_t)(ssize_t r, void *arg);
++class Request;
++
++struct BLOCK{
++    ssize_t on_disk_index;
++    smutex rwlock;
++    uint64_t on_volume_offset;
++    bool inflight_flush;
++    bool process_inflight;
++    bool if_clean;
++    std::time_t ts_write;
++    std::time_t ts_flush;
++    /*req_queue*/
++    WorkQueue<void*> pending_req;
++
++    BLOCK( ssize_t on_disk_index = -1 ):on_disk_index(on_disk_index){
++        if_clean = true;
++        inflight_flush = false;
++        ts_write = 0;
++        process_inflight = false;
++    }
++    void set_process_inflight(bool arg){
++        process_inflight = arg;
++    }
++    void pend_request( void* req ){
++        pending_req.enqueue(req);
++    }
++    void reset(){
++        on_disk_index = -1;
++        on_volume_offset = 0;
++        inflight_flush = false;
++        if_clean = true;
++        ts_write = 0;
++        ts_flush = std::time(nullptr);
++    }
++    void set_cache_clean(){
++        if_clean = true;
++    }
++    void set_cache_dirty(){
++        if_clean = false;
++    }
++    void set_inflight(){
++        inflight_flush = true;
++    }
++    void set_non_inflight(){
++        inflight_flush = false;
++    }
++    void fresh_ts_write( std::time_t ts ){
++        ts_write = ts;
++    }
++    void fresh_ts_flush(){
++        ts_flush = std::time(nullptr);
++    }
++    void set_on_volume_offset( uint64_t offset ){
++        on_volume_offset = offset;
++    }
++    void set_on_disk_index( uint64_t index ){
++        on_disk_index = index;
++    }
++};
++struct Op{
++    uint64_t offset;
++    uint64_t length;
++    uint64_t data_off;
++    Request* req;
++    bool hint;
++    Op(uint64_t offset, uint64_t length, uint64_t data_off, Request* req):
++        offset(offset), length(length), data_off(data_off), req(req), hint(false){}
++    void set_hint(){
++        hint = true;
++    }
++};
++typedef BLOCK* BLOCK_P;
++typedef Op* REQUEST_P;
++typedef std::unordered_map<uint64_t, BLOCK*> BLOCK_INDEX;
++typedef void* LRU_ITEM_TYPE;
++struct Context{
++    LRU_LIST<LRU_ITEM_TYPE> *lru_dirty;
++    LRU_LIST<LRU_ITEM_TYPE> *lru_clean;
++    std::atomic<std::uint64_t> flush_op_count;
++    uint64_t cache_flush_queue_depth;
++    std::condition_variable flush_qd_cond, flush_stop_cond;
++    Context(){
++        lru_dirty = new LRU_LIST<LRU_ITEM_TYPE>();
++        lru_clean = new LRU_LIST<LRU_ITEM_TYPE>();
++        flush_op_count = 0;
++    }
++    ~Context(){
++        delete lru_dirty;
++        delete lru_clean;
++    }
++};
++
++struct C_AioClientCompletion{
++    C_AioClientCompletion( void *cb_arg, callback_t cb ):complete_arg(cb_arg),complete_cb(cb){
++        assert(complete_cb != NULL);
++        assert(complete_arg != NULL);
++    }
++    ~C_AioClientCompletion(){
++    }
++
++    void complete(ssize_t r){
++        if (complete_cb) {
++            complete_cb(r, complete_arg);
++        }
++    }
++    void *complete_arg;
++    callback_t complete_cb;
++
++};
++
++struct Request{
++    uint64_t offset;
++    uint64_t length;
++    char* read_data;
++    const char* write_data;
++    uint32_t io_type;
++    C_AioClientCompletion* comp;
++
++    std::time_t ts;
++    ssize_t request_status;
++    //std::atomic<std::uint64_t> uncomplete_count;
++    //std::atomic<bool> submit_complete;
++    std::uint64_t uncomplete_count;
++    bool submit_complete;
++    std::mutex complete_lock;
++
++    Request(const char* data, uint64_t offset, uint64_t length, void* arg, uint32_t io_type) :
++        offset(offset), length(length), io_type(io_type){
++        if(io_type == REQ_READ) read_data = const_cast<char*>(data);
++        else write_data = data;
++        comp = (C_AioClientCompletion*)arg;
++        ts = std::time(nullptr);
++        request_status = 0;
++        uncomplete_count = 0;
++        submit_complete = false;
++    }
++
++    void set_submit_complete(){
++        std::lock_guard<std::mutex> lock(complete_lock);
++        submit_complete = true;
++    }
++
++    bool may_complete(){
++        std::lock_guard<std::mutex> lock(complete_lock);
++        uncomplete_count--;
++        if(submit_complete && uncomplete_count == 0){
++            complete();
++            return true;
++        }
++        return false;
++    }
++
++    void uncomplete_count_inc(){
++        std::lock_guard<std::mutex> lock(complete_lock);
++        uncomplete_count++;
++    }
++
++    void complete(){
++        comp->complete(request_status);
++    }
++
++    void update_status( ssize_t data ){
++        std::lock_guard<std::mutex> lock(complete_lock);
++        if( data < 0 )
++            request_status = data;
++        else if( request_status >= 0 )
++            request_status += data;
++    }
++
++};
++
++class SimpleBlockCacher{
++ public:
++        SimpleBlockCacher(const char* conf_name);
++        ~SimpleBlockCacher();
++
++        // todo flush
++        int aio_write(const char* buf, uint64_t offset, uint64_t length, void* comp);
++        int aio_read(char* buf, uint64_t offset, uint64_t length, void* comp);
++        int aio_flush(void* comp);
++        int write(const char *buf, uint64_t offset, uint64_t length, std::time_t ts);
++        ssize_t read(char *buf, uint64_t offset, uint64_t length, std::time_t ts);
++        void flush_all();
++        void do_evict( uint64_t cache_entry_id );
++        friend class TEST_SIMPLE_BLOCK_CACHER;
++
++ private:
++    struct free_node{
++        uint64_t index;
++        free_node* next;
++        free_node(){
++            next = nullptr;
++        }
++    };
++
++    const char* m_volume_name;
++    BLOCK_INDEX m_meta_tbl;
++    std::mutex m_meta_tbl_lock;
++
++    // create two type of data to index free cache item
++    // put evict node to free_node_head
++    std::mutex free_node_list_lock;
++    free_node* p_free_node_head;
++    free_node* p_free_node_tail;
++
++    const char* p_device_name;
++    uint64_t m_object_size;
++    uint64_t m_total_size;
++    int m_device_fd;
++
++    uint64_t m_free_list_length;
++
++    bool go;
++    Config *config;
++    WorkQueue<void*> request_queue;
++    ThreadPool* scache_op_threads;
++    ThreadPool* agent_threads;
++    BackendStore* backend_store;
++    Context cct;
++    float cache_flush_ratio;
++    float cache_evict_ratio;
++    int stderr_no;
++    std::string log_path;
++
++    std::atomic<std::uint32_t> threads_count;
++    std::mutex flush_qd_mutex, flush_stop_mutex;
++    std::mutex evict_mutex;
++
++    void process();
++    void do_op(Request* req, uint64_t offset, uint64_t length, uint64_t offset_by_data, bool hint = false);
++    void monitor();
++
++    bool init();
++    int open(const char* device_name);
++    int close(int block_fd);
++    BLOCK_INDEX::iterator m_meta_tbl_lookup(uint64_t cache_entry_id);
++    int64_t write_lookup(uint64_t cache_name, bool no_update = false);
++    int64_t read_lookup(uint64_t cache_name);
++    int64_t free_lookup();
++    void return_to_free(uint64_t cache_entry_id);
++    void map_request_to_cache_entry( Request* req, uint64_t offset, uint64_t length, uint64_t data_off );
++    void handle_request(BLOCK* entry);
++    /*bool update_meta(uint64_t cache_name, uint64_t ondisk_off);*/
++
++    int do_write(uint64_t block_id, const char* buf, uint64_t offset_by_entry, uint64_t length);
++    int do_read(uint64_t block_id, char* buf, uint64_t offset_by_entry, uint64_t length);
++    void do_flush( BLOCK* c_entry );
++    void flush( BLOCK** c_entry_list );
++    void flush_by_ratio( float target_ratio = 0 );
++
++    void do_evict( BLOCK* c_entry, bool lock_already = false );
++    void evict( BLOCK** c_entry_list );
++    void evict_by_ratio( float target_ratio = 0 );
++    void evict_all_clean();
++};
++
++struct C_AioBackendWrite : C_AioBackendCompletion{
++    Context* cct;
++    BLOCK* cache_entry;
++    const char* data;
++    std::time_t ts_write;
++    std::time_t ts_flush;
++
++    C_AioBackendWrite( Context* cct, BLOCK* c_entry, const char* data ) :
++        cct(cct), cache_entry(c_entry), data(data){
++        cache_entry->inflight_flush = true;
++        ts_write = std::time(nullptr);
++        ts_flush = std::time(nullptr);
++    }
++    void finish( ssize_t r ){
++
++        cct->flush_op_count--;
++
++        if(cct->flush_op_count < cct->cache_flush_queue_depth)
++            cct->flush_qd_cond.notify_one();
++
++        WriteLock cache_entry_w_lock(cache_entry->rwlock);
++        if (ts_write < cache_entry->ts_write) {
++            if( ts_flush >= cache_entry->ts_flush )
++                cache_entry->set_non_inflight();
++            delete data;
++            return;
++        }
++        //TODO: if rbd_aio_write fails, will be flushed in the next round
++        if( r < 0 ){
++            log_err("C_AioBackendCompletion finish failed, errno: %s\n", std::strerror(r));
++            cache_entry->set_non_inflight();
++        }else{
++            cache_entry->set_cache_clean();
++            cache_entry->set_non_inflight();
++            cct->lru_dirty->remove( (LRU_ITEM_TYPE)cache_entry );
++            cct->lru_clean->touch_key( (LRU_ITEM_TYPE)cache_entry );
++        }
++        delete data;
++    }
++};
++
++
++}  // namespace dslab
++
++#endif  // SCACHE_SIMPLEBLOCKCACHER_H_
+diff --git a/src/librbd/sbc/common.h b/src/librbd/sbc/common.h
+new file mode 100644
+index 0000000..f2fc849
+--- /dev/null
++++ b/src/librbd/sbc/common.h
+@@ -0,0 +1,748 @@
++#ifndef COMMON_H
++#define COMMON_H
++
++#include <map>
++#include <string>
++#include <vector>
++#include <iostream>
++#include <atomic>
++#include <thread>
++#include <mutex>
++#include <list>
++#include <queue>
++#include <functional>
++#include <chrono>
++#include <condition_variable>
++#include <boost/unordered_map.hpp>
++#include <stdint.h>
++#include <stdlib.h>
++#include <stdarg.h>
++
++#include "include/rbd/librbd.h"
++
++
++#include <boost/property_tree/ptree.hpp>
++#include <boost/property_tree/ini_parser.hpp>
++#include <boost/thread/locks.hpp>
++#include <boost/thread/shared_mutex.hpp>
++
++#define HS_OK        0
++#define HS_ERR      -1
++#define HS_EAGIN    -2
++#define HS_ENOMEM   -3
++
++#define BUF_SIZE 512
++#define LOG_PRINT_ENABLE 1
++
++
++namespace dslab {
++
++typedef boost::shared_mutex smutex;
++typedef boost::unique_lock< smutex > WriteLock;
++typedef boost::shared_lock< smutex > ReadLock;
++
++struct C_AioBackendCompletion{
++
++    C_AioBackendCompletion(){}
++    virtual void finish( ssize_t r ) = 0;
++    virtual ~C_AioBackendCompletion(){}
++};
++
++
++
++struct rbd_aio_unit {
++    rbd_completion_t completion;
++    C_AioBackendCompletion *onfinish;
++    rbd_aio_unit( C_AioBackendCompletion *onfinish ):onfinish(onfinish){}
++    ~rbd_aio_unit(){
++        delete onfinish;
++    }
++};
++static void scache_backend_finish_aiocb( rbd_completion_t comp, void *data ){
++    rbd_aio_unit *io_u = (rbd_aio_unit*)data;
++    ssize_t ret = rbd_aio_get_return_value(comp);
++    io_u->onfinish->finish( ret );
++    delete io_u;
++}
++
++
++static bool LOG_DEBUG_ENABLE = false;
++static FILE* log_fd = stderr;
++
++static int timespec2str(char *buf, uint16_t len, struct timespec *ts) {
++    int ret;
++    struct tm t;
++
++    tzset();
++    if (localtime_r(&(ts->tv_sec), &t) == NULL)
++        return 1;
++
++    ret = strftime(buf, len, "%F %T", &t);
++    if (ret == 0)
++        return 2;
++    len -= ret - 1;
++
++    ret = snprintf(&buf[strlen(buf)], len, ".%09ld", ts->tv_nsec);
++    if (ret >= len)
++        return 3;
++
++    return 0;
++}
++
++
++static void get_time(char* time_str)
++{
++    const uint16_t TIME_FMT = strlen("2012-12-31 12:59:59.123456789") + 1;
++    struct timespec spec;
++    clock_gettime(CLOCK_REALTIME, &spec);
++    timespec2str( time_str, TIME_FMT, &spec);
++}
++static void log_err( const char* output, ... ){
++    char *time_str = (char*)malloc( sizeof(char) * BUF_SIZE );
++    char *buf = (char*)malloc( sizeof(char) * BUF_SIZE );
++    va_list vl;
++    va_start(vl, output);
++    vsnprintf( buf, BUF_SIZE, output, vl);
++    va_end(vl);
++    get_time(time_str);
++    fprintf( log_fd, "[%s] %s", time_str, buf );
++    free( time_str );
++    free( buf );
++}
++
++static void log_print( const char* output, ... ){
++    if( !LOG_PRINT_ENABLE )
++        return;
++
++    char *time_str = (char*)malloc( sizeof(char) * BUF_SIZE );
++    char *buf = (char*)malloc( sizeof(char) * BUF_SIZE );
++    va_list vl;
++    va_start(vl, output);
++    vsnprintf( buf, BUF_SIZE, output, vl);
++    va_end(vl);
++    get_time(time_str);
++    fprintf( log_fd, "[%s] %s", time_str, buf );
++    free( time_str );
++    free( buf );
++}
++
++static inline void log_debug( const char* output, ... ){
++    if( !LOG_DEBUG_ENABLE )
++        return;
++
++    char *time_str = (char*)malloc( sizeof(char) * BUF_SIZE );
++    char *buf = (char*)malloc( sizeof(char) * BUF_SIZE );
++    va_list vl;
++    va_start(vl, output);
++    vsnprintf( buf, BUF_SIZE, output, vl);
++    va_end(vl);
++    get_time(time_str);
++    fprintf( log_fd, "[%s] %s", time_str, buf );
++    free( time_str );
++    free( buf );
++}
++
++class BackendStore{
++public:
++    BackendStore( const char* client_name ){
++        int r;
++
++        r = rados_create(&cluster, client_name);
++        if (r < 0) {
++            log_err("rados_create failed.\n");
++            goto failed_early;
++        }
++
++        r = rados_conf_read_file(cluster, NULL);
++        if (r < 0) {
++            log_err("rados_conf_read_file failed.\n");
++            goto failed_early;
++        }
++
++        r = rados_connect(cluster);
++        if (r < 0) {
++            log_err("rados_connect failed.\n");
++            goto failed_shutdown;
++        }
++        return;
++    failed_shutdown:
++        log_err("failed_shutdown\n");
++        rados_shutdown(cluster);
++        cluster = NULL;
++    failed_early:
++        log_err("failed_early\n");
++        assert(0);
++        return;
++    }
++
++    ~BackendStore(){
++        log_print("BackendStore destruction\n");
++        for(std::map<std::string, rbd_data*>::iterator it=rbd_info_map.begin(); it!=rbd_info_map.end(); ++it){
++            _close( it->second );
++        }
++        if(cluster){
++            rados_shutdown(cluster);
++            cluster = NULL;
++        }
++        log_print("BackendStore destruction complete\n");
++    }
++
++    int write( std::string rbd_name, uint64_t offset, uint64_t length, const char* data,
++            std::string pool_name = "rbd" ){
++        int r = 0;
++        rbd_data* rbd = find_rbd_data( rbd_name, pool_name );
++        if( !rbd )
++            return -1;
++        r = _write( rbd,  offset, length, data );
++        return r;
++    }
++
++    int read( std::string rbd_name, uint64_t offset, uint64_t length, char* data,
++            std::string pool_name = "rbd" ){
++        int r = 0;
++        rbd_data* rbd = find_rbd_data( rbd_name, pool_name );
++        if( !rbd )
++            return -1;
++        r = _read( rbd, offset, length, data );
++        return r;
++    }
++
++    int aio_write( std::string rbd_name, uint64_t offset, uint64_t length, const char* data,
++            C_AioBackendCompletion *onfinish, std::string pool_name = "rbd" ){
++        int r = 0;
++        rbd_data* rbd = find_rbd_data( rbd_name, pool_name );
++        if( !rbd )
++            return -1;
++        r = _aio_write( rbd,  offset, length, data, onfinish );
++        return r;
++    }
++
++    int aio_read( std::string rbd_name, uint64_t offset, uint64_t length, char* data,
++            C_AioBackendCompletion* onfinish, std::string pool_name = "rbd" ){
++        int r = 0;
++        rbd_data* rbd = find_rbd_data( rbd_name, pool_name );
++        if( !rbd )
++            return -1;
++        r = _aio_read( rbd, offset, length, data, onfinish );
++        return r;
++    }
++
++    int aio_write( const char* rbd_name, uint64_t offset, uint64_t length, const char* data,
++         C_AioBackendCompletion *onfinish, std::string pool_name = "rbd" ){
++        std::string rbd_name_str(rbd_name);
++        return aio_write(rbd_name_str, offset, length, data, onfinish, pool_name);
++    }
++
++    int aio_read( const char* rbd_name, uint64_t offset, uint64_t length, char* data,
++         C_AioBackendCompletion *onfinish, std::string pool_name = "rbd" ){
++        std::string rbd_name_str(rbd_name);
++        return aio_read(rbd_name_str, offset, length, data, onfinish, pool_name);
++    }
++
++private:
++    struct rbd_data {
++        rados_ioctx_t io_ctx;
++        rbd_image_t image;
++        std::string pool_name;
++
++        rbd_data( std::string _pool_name ){
++            pool_name = _pool_name;
++        }
++    };
++
++    std::map<std::string, rbd_data*> rbd_info_map;
++    std::mutex rbd_info_map_lock;
++    rados_t cluster;
++
++    int _open( std::string rbd_name, std::string pool_name ){
++        rbd_data *rbd = new rbd_data( pool_name );
++
++        //printf("connect to rados\n");
++        int r = rados_ioctx_create(cluster, pool_name.c_str(), &rbd->io_ctx);
++        if (r < 0) {
++            log_err("rados_ioctx_create failed.\n");
++            goto failed_shutdown;
++        }
++
++        //printf("rbd_open\n");
++        log_print("BackendStore::open %s\n", rbd_name.c_str());
++        r = rbd_open_skip_cache(rbd->io_ctx, rbd_name.c_str(), &rbd->image, NULL /*snap */ );
++        //r = rbd_open(rbd->io_ctx, rbd_name.c_str(), &rbd->image, NULL /*snap */ );
++        if (r < 0) {
++            log_err("rbd_open failed.\n");
++            goto failed_open;
++        }
++
++        log_print("add rbd into rbd_info_map\n");
++        rbd_info_map[rbd_name] = rbd;
++        return 0;
++
++    failed_open:
++        log_err("failed_open\n");
++        rados_ioctx_destroy(rbd->io_ctx);
++        rbd->io_ctx = NULL;
++    failed_shutdown:
++        log_err("failed_shutdown\n");
++        rados_shutdown(cluster);
++        cluster = NULL;
++        return -1;
++    }
++
++    int _close( std::string rbd_name ){
++        std::map<std::string, rbd_data*>::iterator it = rbd_info_map.find(rbd_name);
++        if(it==rbd_info_map.end())
++            return 0;
++        rbd_data* rbd = it->second;
++        int ret = _close( rbd );
++        if( ret == 0 ) delete rbd;
++        return ret;
++    }
++
++    int _close(rbd_data* rbd ){
++        rados_ioctx_destroy(rbd->io_ctx);
++        //rbd_close(rbd->io_ctx);
++        rbd->io_ctx = NULL;
++        return 0;
++    }
++
++    rbd_data* find_rbd_data( std::string rbd_name, std::string pool_name ){
++        int r = 0;
++        rbd_info_map_lock.lock();
++        std::map<std::string, rbd_data*>::iterator it = rbd_info_map.find(rbd_name);
++        if( it == rbd_info_map.end() ){
++            //printf("%s not open, open now\n", rbd_name.c_str());
++            r = _open( rbd_name, pool_name );
++            if( r != 0 ){
++                rbd_info_map_lock.unlock();
++                assert(0);
++                return NULL;
++            }
++            it = rbd_info_map.find(rbd_name);
++        }
++        rbd_info_map_lock.unlock();
++        return it->second;
++    }
++
++    int _write( rbd_data* rbd, uint64_t offset, uint64_t length, const char* data ){
++        //log_print("rbd_write: offset:%lu, length: %lu\n", offset, length);
++        int r = rbd_write(rbd->image, offset, length, data);
++        if (r < 0) {
++            log_err("rbd_write failed.\n");
++            return -1;
++        }
++        return r;
++    }
++
++    ssize_t _read( rbd_data* rbd, uint64_t offset, uint64_t length, char* data ){
++        //std::cerr << "rbd_read: offset:" << offset << " length:" << length << std::endl;
++        ssize_t r = rbd_read(rbd->image, offset, length, data);
++        if (r < 0) {
++            log_err("rbd_read failed.\n");
++            return -1;
++        }
++        return r;
++    }
++
++    int _aio_write( rbd_data* rbd, uint64_t offset, uint64_t length, const char* data, C_AioBackendCompletion* onfinish ){
++        rbd_aio_unit *io_u = new rbd_aio_unit( onfinish );
++        int r = rbd_aio_create_completion(io_u, scache_backend_finish_aiocb, &io_u->completion);
++        //std::cerr << "rbd_aio_write: comp: " << io_u->completion << " offset: " << offset << " length: " << length<< std::endl;
++        r = rbd_aio_write(rbd->image, offset, length, data, io_u->completion);
++        if (r < 0) {
++            log_err("queue rbd_aio_write failed.\n");
++            return -1;
++        }
++        return 0;
++    }
++
++    ssize_t _aio_read( rbd_data* rbd, uint64_t offset, uint64_t length, char* data, C_AioBackendCompletion* onfinish ){
++        //log_print("rbd_aio_read: offset:%lu, length: %lu\n", offset, length);
++        rbd_aio_unit *io_u = new rbd_aio_unit( onfinish );
++        ssize_t r = rbd_aio_create_completion(io_u, scache_backend_finish_aiocb, &io_u->completion);
++        if(r < 0){
++            log_err("rbd_read failed create completion.\n");
++            return -1;
++        }
++        //std::cerr << "rbd_aio_read: comp: " << io_u->completion << " offset: " << offset << " length: " << length<< std::endl;
++        r = rbd_aio_read(rbd->image, offset, length, data, io_u->completion);
++        if (r < 0) {
++            log_err("rbd_aio_read failed.\n");
++            return -1;
++        }
++        return r;
++    }
++
++
++
++};
++
++
++class ThreadPool {
++ public:
++    ThreadPool(size_t thd_cnt):jobs_left(0), bailout(false), finished(false), ThreadCount(thd_cnt) {
++        for ( size_t i = 0; i < ThreadCount; ++i )
++            threads.push_back(std::move(std::thread( [this,i]{ this->Task(); } )));
++    }
++    ~ThreadPool() {
++        JoinAll();
++    }
++
++    void schedule(std::function<void(void)> job) {
++        std::lock_guard<std::mutex> guard(queue_mutex);
++        queue.emplace_back(job);
++        ++jobs_left;
++        job_available_var.notify_one();
++    }
++
++    size_t Size() const {
++        return ThreadCount;
++    }
++
++    void JoinAll(bool WaitForAll = true) {
++        if ( !finished ) {
++            if( WaitForAll ) {
++                WaitAll();
++            }
++
++            // note that we're done, and wake up any thread that's
++            // waiting for a new job
++            bailout = true;
++            job_available_var.notify_all();
++
++            for( auto &x : threads )
++                if( x.joinable() )
++                    x.join();
++            finished = true;
++        }
++    }
++
++    void WaitAll() {
++        if ( jobs_left > 0 ) {
++            std::unique_lock<std::mutex> lk( wait_mutex );
++            wait_var.wait( lk, [this]{ return this->jobs_left == 0; } );
++            lk.unlock();
++        }
++    }
++
++ private:
++    std::vector<std::thread> threads;
++    std::list<std::function<void(void)>> queue;
++
++    std::atomic_int         jobs_left;
++    std::atomic_bool        bailout;
++    std::atomic_bool        finished;
++    size_t ThreadCount;
++    std::condition_variable job_available_var;
++    std::condition_variable wait_var;
++    std::mutex              wait_mutex;
++    std::mutex              queue_mutex;
++
++    /**
++     *  Take the next job in the queue and run it.
++     *  Notify the main thread that a job has completed.
++     */
++    void Task() {
++        while ( !bailout ) {
++            next_job()();
++            --jobs_left;
++            wait_var.notify_one();
++        }
++    }
++
++    /**
++     *  Get the next job; pop the first item in the queue,
++     *  otherwise wait for a signal from the main thread.
++     */
++    std::function<void(void)> next_job() {
++        std::function<void(void)> res;
++        std::unique_lock<std::mutex> job_lock( queue_mutex );
++
++        // Wait for a job if we don't have any.
++        job_available_var.wait(job_lock, [this]() ->bool { return queue.size() || bailout; });
++
++        // Get job from the queue
++        if ( !bailout ) {
++            res = queue.front();
++            queue.pop_front();
++        }
++        else { // If we're bailing out, 'inject' a job into the queue to keep jobs_left accurate.
++            res = []{};
++            ++jobs_left;
++        }
++        return res;
++    }
++};
++
++class Config{
++public:
++    typedef std::map<std::string, std::string> ConfigInfo;
++    ConfigInfo configValues{
++        {"cache_dir","/mnt/hyperstash_0/"},
++        {"cache_min_alloc_size","4096"},
++        {"cache_total_size","10737418240"},
++        {"cache_flush_queue_depth","64"},
++        {"cacheservice_threads_num","64"},
++        {"log_to_file","false"},
++        {"cache_flush_ratio","0.5"},
++        {"cache_evict_ratio","0.8"}
++    };
++    Config(std::string rbd_name){
++
++        const std::string cfg_file = "/etc/sbc/general.conf";
++        boost::property_tree::ptree pt;
++        try {
++            boost::property_tree::ini_parser::read_ini(cfg_file, pt);
++        } catch(...) {
++            std::cout << "error when reading: " << cfg_file
++                      << ", config file for missing?" << std::endl;
++            // assume general.conf should be created by admin manually
++            assert(0);
++        }
++
++        std::string s;
++        for (ConfigInfo::const_iterator it = configValues.begin(); it!=configValues.end(); it++) {
++            try {
++                s = pt.get<std::string>(rbd_name + "." + it->first);
++            } catch(...) {
++                try {
++                    s = pt.get<std::string>("global." + it->first);
++                } catch(...) {
++                    continue;
++                }
++                if ((it->first == "log_to_file")&&(s != "false")) {
++                    pt.put(rbd_name + "." + it->first, s + "_" + rbd_name + ".log");
++                    s = s + "_" + rbd_name + ".log";
++                } else {
++                    pt.put(rbd_name + "." + it->first, s);
++                }
++            }
++            if (s == "") {
++                s = pt.get<std::string>("global." + it->first);
++                pt.put(rbd_name + "." + it->first, s);
++            }
++            configValues[it->first] = s;
++            s = "";
++        }
++        //boost::property_tree::ini_parser::write_ini(cfg_file, pt);
++        configValues["log_to_file"] = configValues["log_to_file"] + "_" + rbd_name + ".log";
++        configValues["cache_dir_run"] = configValues["cache_dir"] + "/" + rbd_name + "_run";
++    }
++    ~Config(){
++    }
++};
++
++template <typename T> class WorkQueue{
++public:
++    typedef T queue_type;
++    std::queue<queue_type> _queue;
++    std::mutex _queue_lock;
++    std::mutex cond_lock;
++    //std::mutex::scoped_lock scope_cond_lock;
++    std::condition_variable m_cond;
++    std::unique_lock<std::mutex> unique_lock;
++
++    //WorkQueue():scope_cond_lock(cond_lock){}
++    WorkQueue():unique_lock(cond_lock){}
++
++    void enqueue( queue_type _work ){
++        std::lock_guard<std::mutex> guard(_queue_lock);
++        this->_queue.push( _work );
++        m_cond.notify_all();
++    }
++
++    queue_type dequeue(){
++        //m_cond.wait(unique_lock, [&]{return !empty();});
++        if(m_cond.wait_for(unique_lock, std::chrono::milliseconds(50), [&]{return !empty();})){
++            std::lock_guard<std::mutex> guard(_queue_lock);
++            queue_type data = this->_queue.front();
++            this->_queue.pop();
++            return data;
++
++        }else{
++            return NULL;
++        }
++    }
++
++    bool empty(){
++        std::lock_guard<std::mutex> guard(_queue_lock);
++        return this->_queue.empty();
++    }
++
++    ssize_t size(){
++        std::lock_guard<std::mutex> guard(_queue_lock);
++        return this->_queue.size();
++    }
++
++    void wake_all(){
++        m_cond.notify_all();
++    }
++};
++
++
++template< typename key_type > class LRU_LIST{
++private:
++    struct LRU_LIST_NODE{
++        typename boost::unordered::unordered_map<key_type, LRU_LIST_NODE*>::const_iterator _it;
++        LRU_LIST_NODE* prev;
++        LRU_LIST_NODE* next;
++        LRU_LIST_NODE(){
++            prev = NULL;
++            next = NULL;
++        }
++        void init(typename boost::unordered::unordered_map<key_type, LRU_LIST_NODE*>::const_iterator it){
++            _it = it;
++        }
++    };
++    typedef boost::unordered::unordered_map<key_type, LRU_LIST_NODE*> EntryMap;
++    EntryMap _key_to_point_map;
++
++    LRU_LIST_NODE *head;
++    LRU_LIST_NODE *tail;
++    uint64_t length;
++    ssize_t _key_to_point_map_size;
++    std::mutex _lock;
++public:
++    LRU_LIST(){
++        length = 0;
++        head = NULL;
++        tail = NULL;
++        _key_to_point_map_size = _key_to_point_map.size();
++    }
++    ~LRU_LIST(){
++        LRU_LIST_NODE *tmp = head;
++        while( tmp!=NULL ){
++            LRU_LIST_NODE *tmp_next = tmp->next;
++            delete tmp;
++            tmp = tmp_next;
++            delete tmp_next;
++        }
++
++    }
++
++    void get_keys( key_type* dst, uint64_t required_len = 0, bool most_recent_top = true ){
++        if (0 == required_len) {
++            // need to get keys
++            return;
++        }
++        uint64_t count = 0;
++        LRU_LIST_NODE* src;
++        _lock.lock();
++        if(most_recent_top){
++            src = head;
++            while(count < length){
++                *dst++ = src->_it->first;
++                src = src->next;
++                count++;
++                if(count==required_len)
++                    break;
++            }
++        }else{
++            src = tail;
++            while(count < length){
++                *dst++ = src->_it->first;
++                src = src->prev;
++                count++;
++                if(count == required_len)
++                    break;
++            }
++        }
++        _lock.unlock();
++        return;
++    }
++
++    void touch_key( const key_type& k ){
++        LRU_LIST_NODE* node;
++        _lock.lock();
++        const typename EntryMap::iterator it = _key_to_point_map.find(k);
++        if( it == _key_to_point_map.end() ){
++            node = insert(k);
++        }else{
++            node = it->second;
++            touch_key( node );
++        }
++        _lock.unlock();
++    }
++
++    void touch_key( LRU_LIST_NODE* key ){
++        //fprintf(stderr, "touch_key %p\n", key);
++
++        if( head == key ){
++            return;
++        }
++        LRU_LIST_NODE* head_next = head;
++        LRU_LIST_NODE* orig_prev = key->prev;
++        LRU_LIST_NODE* orig_next = key->next;
++
++        orig_prev->next = orig_next;
++        if(orig_next)
++            orig_next->prev = orig_prev;
++        else
++            tail = orig_prev;
++
++        head = key;
++        head->next = head_next;
++        // reset head->prev to NULL
++        head->prev = NULL;
++        head_next->prev = head;
++    }
++
++    void remove( const key_type& k ){
++        _lock.lock();
++        const typename EntryMap::iterator it = _key_to_point_map.find(k);
++        if( it != _key_to_point_map.end() ){
++            remove( it->second );
++        }
++        _lock.unlock();
++    }
++
++    void remove( LRU_LIST_NODE* key ){
++
++        LRU_LIST_NODE* orig_prev = key->prev;
++        LRU_LIST_NODE* orig_next = key->next;
++
++        if(head == key)
++            head = orig_next;
++        else
++            orig_prev->next = orig_next;
++
++        if(orig_next)
++            orig_next->prev = orig_prev;
++        else
++            tail = orig_prev;
++
++        length--;
++        _key_to_point_map.erase( key->_it );
++        _key_to_point_map_size = _key_to_point_map.size();
++        delete key;
++    }
++
++    LRU_LIST_NODE* insert( const key_type& k ) {
++        LRU_LIST_NODE* new_node = new LRU_LIST_NODE();
++        typename EntryMap::iterator it = _key_to_point_map.insert( std::make_pair(k, new_node) ).first;
++        _key_to_point_map_size = _key_to_point_map.size();
++        new_node->init( it );
++
++        LRU_LIST_NODE* head_next = head;
++        head = new_node;
++        head->next = head_next;
++
++        if(head_next)
++            head_next->prev = head;
++        else
++            tail = head;
++        length++;
++        //fprintf(stderr, "insert %p\n", new_node);
++        return new_node;
++    }
++
++    uint64_t get_length(){
++        return length;
++    }
++
++};
++
++
++
++}
++
++#endif
+diff --git a/src/librbd/sbc/libsbc.h b/src/librbd/sbc/libsbc.h
+new file mode 100644
+index 0000000..f15b5cb
+--- /dev/null
++++ b/src/librbd/sbc/libsbc.h
+@@ -0,0 +1,35 @@
++#ifndef LIBSCACHE_H
++#define LIBSCACHE_H
++#include "SimpleBlockCacher.h"
++
++namespace dslab {
++
++typedef void *sbc_completion_t;
++static inline void sbc_aio_release(sbc_completion_t c){
++    C_AioClientCompletion *comp = (C_AioClientCompletion*) c;
++    delete comp;
++}
++
++static inline int sbc_aio_create_completion(void *cb_arg, callback_t complete_cb, sbc_completion_t *c){
++    C_AioClientCompletion *comp = new C_AioClientCompletion(cb_arg, complete_cb);
++    *c = (sbc_completion_t) comp;
++    return 0;
++}
++
++class libsbc{
++public:
++    libsbc(const char* rbd_name);
++    ~libsbc();
++    int sbc_aio_read( uint64_t offset, uint64_t length, char* data, sbc_completion_t comp );
++    int sbc_aio_write( uint64_t offset, uint64_t length, const char* data, sbc_completion_t comp );
++    int sbc_aio_flush( sbc_completion_t comp );
++    int sbc_read( uint64_t offset, uint64_t length, char* data );
++    int sbc_write( uint64_t offset, uint64_t length, const char* data );
++    int sbc_flush();
++    int sbc_discard(uint64_t offset, uint64_t length);
++private:
++    SimpleBlockCacher *sbc;
++    char* volume_name;
++};
++}
++#endif
+diff --git a/src/test/Makefile-client.am b/src/test/Makefile-client.am
+index 6eade23..0f36688 100644
+--- a/src/test/Makefile-client.am
++++ b/src/test/Makefile-client.am
+@@ -518,6 +518,7 @@ ceph_test_rbd_mirror_LDADD = \
+ 	libcls_rbd_client.la \
+ 	libcls_lock_client.la \
+ 	libcls_journal_client.la \
++        librbd/librbd_la-librbd.lo \
+ 	$(LIBRBD_TYPES) \
+ 	librados_api.la $(LIBRADOS_DEPS) \
+ 	$(LIBOSDC) $(UNITTEST_LDADD) \
+diff --git a/src/tools/Makefile-client.am b/src/tools/Makefile-client.am
+index e0488fc..0a7368f 100644
+--- a/src/tools/Makefile-client.am
++++ b/src/tools/Makefile-client.am
+@@ -154,6 +154,7 @@ rbd_mirror_LDADD = \
+ 	libcls_rbd_client.la \
+ 	libcls_lock_client.la \
+ 	libcls_journal_client.la \
++        librbd/librbd_la-librbd.lo \
+ 	$(CEPH_GLOBAL)
+ bin_PROGRAMS += rbd-mirror
+ 
+diff --git a/src/tools/rbd/action/Remove.cc b/src/tools/rbd/action/Remove.cc
+index 01b36cb..02fbf96 100644
+--- a/src/tools/rbd/action/Remove.cc
++++ b/src/tools/rbd/action/Remove.cc
+@@ -5,6 +5,8 @@
+ #include "tools/rbd/Shell.h"
+ #include "tools/rbd/Utils.h"
+ #include "common/errno.h"
++#include "common/ceph_context.h"
++#include "common/config.h"
+ #include <iostream>
+ #include <boost/program_options.hpp>
+ 
+@@ -20,6 +22,10 @@ static int do_delete(librbd::RBD &rbd, librados::IoCtx& io_ctx,
+ {
+   utils::ProgressContext pc("Removing image", no_progress);
+   int r = rbd.remove_with_progress(io_ctx, imgname, pc);
++  CephContext *cct = (CephContext *)io_ctx.cct();
++  std::string cache_volume_name = cct->_conf->rbd_cache_volume_name + \
++    "_" + std::string(imgname);
++  rbd.remove(io_ctx, cache_volume_name.c_str());
+   if (r < 0) {
+     pc.fail();
+     return r;
+-- 
+1.9.1
+

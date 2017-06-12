@@ -1,0 +1,594 @@
+From 0494daabafe38ce1414a12b72556114c7436438c Mon Sep 17 00:00:00 2001
+From: Yuan Zhou <yuan.zhou@intel.com>
+Date: Mon, 13 Mar 2017 10:50:58 +0800
+Subject: [PATCH 1/1] librbd: testing librbd ssd cache
+
+Signed-off-by: Yuan Zhou <yuan.zhou@intel.com>
+---
+ src/common/config_opts.h            |   5 ++
+ src/common/dout.h                   |   2 +-
+ src/include/rbd/librbd.h            |   2 +
+ src/librbd/CMakeLists.txt           |   3 +-
+ src/librbd/CacheImageCtx.cc         |  75 ++++++++++++++++++++++
+ src/librbd/CacheImageCtx.h          |  40 ++++++++++++
+ src/librbd/ImageCtx.cc              |   2 +-
+ src/librbd/ImageCtx.h               |   1 +
+ src/librbd/ImageState.h             |   2 +-
+ src/librbd/internal.cc              |  28 +++++++++
+ src/librbd/librbd.cc                | 121 ++++++++++++++++++++++++++++++------
+ src/rbd_replay/CMakeLists.txt       |   1 +
+ src/test/librbd/CMakeLists.txt      |   2 +
+ src/test/rbd_mirror/CMakeLists.txt  |   4 +-
+ src/tools/rbd_mirror/CMakeLists.txt |   2 +-
+ src/tools/rbd_nbd/CMakeLists.txt    |   2 +-
+ 16 files changed, 265 insertions(+), 27 deletions(-)
+ create mode 100644 src/librbd/CacheImageCtx.cc
+ create mode 100644 src/librbd/CacheImageCtx.h
+
+diff --git a/src/common/config_opts.h b/src/common/config_opts.h
+index 312b8ed..e2675a6 100644
+--- a/src/common/config_opts.h
++++ b/src/common/config_opts.h
+@@ -1233,6 +1233,11 @@ OPTION(rbd_validate_names, OPT_BOOL, true) // true if image specs should be vali
+ OPTION(rbd_auto_exclusive_lock_until_manual_request, OPT_BOOL, true) // whether to automatically acquire/release exclusive lock until it is explicitly requested, i.e. before we know the user of librbd is properly using the lock API
+ OPTION(rbd_mirroring_resync_after_disconnect, OPT_BOOL, false) // automatically start image resync after mirroring is disconnected due to being laggy
+ 
++OPTION(rbd_cache_volume_enable, OPT_BOOL, true)
++OPTION(rbd_cache_volume_name, OPT_STR, "cache_volume")
++OPTION(rbd_cache_volume_backend, OPT_STR, "hyperstash")
++
++
+ /*
+  * The following options change the behavior for librbd's image creation methods that
+  * don't require all of the parameters. These are provided so that older programs
+diff --git a/src/common/dout.h b/src/common/dout.h
+index 9f8fd27..2aa3f69 100644
+--- a/src/common/dout.h
++++ b/src/common/dout.h
+@@ -78,7 +78,7 @@ public:
+ // NOTE: depend on magic value in _ASSERT_H so that we detect when
+ // /usr/include/assert.h clobbers our fancier version.
+ #define dendl std::flush;				\
+-  _ASSERT_H->_log->submit_entry(_dout_e);		\
++  _dout_cct->_log->submit_entry(_dout_e);		\
+     }						\
+   } while (0)
+ 
+diff --git a/src/include/rbd/librbd.h b/src/include/rbd/librbd.h
+index 10ac86a..6a27c35 100644
+--- a/src/include/rbd/librbd.h
++++ b/src/include/rbd/librbd.h
+@@ -274,6 +274,8 @@ CEPH_RBD_API int rbd_mirror_image_status_summary(rados_ioctx_t io_ctx,
+ 
+ CEPH_RBD_API int rbd_open(rados_ioctx_t io, const char *name,
+                           rbd_image_t *image, const char *snap_name);
++CEPH_RBD_API int rbd_open_skip_cache(rados_ioctx_t io, const char *name,
++                          rbd_image_t *image, const char *snap_name);
+ 
+ CEPH_RBD_API int rbd_aio_open(rados_ioctx_t io, const char *name,
+ 			      rbd_image_t *image, const char *snap_name,
+diff --git a/src/librbd/CMakeLists.txt b/src/librbd/CMakeLists.txt
+index 4f46c1f..c442160 100644
+--- a/src/librbd/CMakeLists.txt
++++ b/src/librbd/CMakeLists.txt
+@@ -16,6 +16,7 @@ set(librbd_internal_srcs
+   ExclusiveLock.cc
+   Group.cc
+   ImageCtx.cc
++  CacheImageCtx.cc
+   ImageState.cc
+   ImageWatcher.cc
+   internal.cc
+@@ -115,7 +116,7 @@ target_link_libraries(librbd LINK_PRIVATE
+   udev
+   keyutils
+   ${CMAKE_DL_LIBS}
+-  ${EXTRALIBS})
++  ${EXTRALIBS} rbc boost_serialization)
+ if(ENABLE_SHARED)
+   set_target_properties(librbd PROPERTIES
+     OUTPUT_NAME rbd
+diff --git a/src/librbd/CacheImageCtx.cc b/src/librbd/CacheImageCtx.cc
+new file mode 100644
+index 0000000..41794b1
+--- /dev/null
++++ b/src/librbd/CacheImageCtx.cc
+@@ -0,0 +1,75 @@
++#include "librbd/AioCompletion.h"
++#include "librbd/ImageState.h"
++#include "librbd/CacheImageCtx.h"
++
++#define dout_subsys ceph_subsys_rbd
++#undef dout_prefix
++#define dout_prefix *_dout << "librbd::CacheImageCtx: "
++
++namespace librbd {
++
++struct rbc_io_unit{
++    Context* onfinish;
++    rbc::rbc_completion_t comp;
++    rbc_io_unit( Context* onfinish ):onfinish(onfinish){}
++    ~rbc_io_unit(){
++    }
++};
++
++static void _finish_rbc_aio(int r, void *data){
++    rbc_io_unit* io_u = (rbc_io_unit*) data;
++    io_u->onfinish->complete(r);
++    rbc::rbc_aio_release( io_u->comp );
++    delete io_u;
++}
++
++CacheImageCtx::CacheImageCtx(const std::string &image_name,
++        const std::string &image_id, const char *snap,
++        const std::string &real_image_name, IoCtx& p,
++        bool read_only):ImageCtx(image_name, "", "", p, read_only){
++    this->cached_image_name = real_image_name;
++    this->is_cache_volume = true;
++    this->cache_inst = new rbc::librbc(real_image_name.c_str());
++    ldout(cct, 1) << "Open CacheImage:" << image_name << dendl;
++    //this->cached_image_snap_name = snap;
++}
++
++void CacheImageCtx::delete_CacheImageCtx(){
++    delete cache_inst;
++}
++
++void CacheImageCtx::aio_write( AioCompletion *c,
++        uint64_t off, size_t len, const char *buf,
++        int op_flags ){
++    ldout(cct, 1) << "do aio_write off:" << off << " len:" << len << dendl;
++    c->init_time(this, librbd::AIO_TYPE_WRITE);
++    c->start_op();
++    c->get();
++    c->set_request_count(1);
++    C_AioRequest* onfinish = new C_AioRequest( c );
++    rbc_io_unit *io_u = new rbc_io_unit( onfinish );
++    rbc::rbc_aio_create_completion( (void*)io_u, _finish_rbc_aio, &(io_u->comp) );
++    cache_inst->rbc_aio_write(cached_image_name.c_str(), off, len, buf, io_u->comp);
++    c->put();
++    return;
++}
++
++void CacheImageCtx::aio_read( AioCompletion *c,
++        uint64_t off, size_t len, char *buf,
++        int op_flags ){
++    ldout(cct, 1) << "do aio_read off:" << off << " len:" << len << dendl;
++    c->init_time(this, librbd::AIO_TYPE_READ);
++    c->start_op();
++    c->get();
++    c->set_request_count(1);
++    C_AioRequest* onfinish = new C_AioRequest( c );
++    //todo: add check for backend,
++    //if not hyperstash, then use default aio_write
++    rbc_io_unit *io_u = new rbc_io_unit( onfinish );
++    rbc::rbc_aio_create_completion( (void*)io_u, _finish_rbc_aio, &(io_u->comp) );
++    cache_inst->rbc_aio_read(cached_image_name.c_str(), off, len, buf, io_u->comp);
++    c->put();
++    return;
++}
++}
++
+diff --git a/src/librbd/CacheImageCtx.h b/src/librbd/CacheImageCtx.h
+new file mode 100644
+index 0000000..363dfca
+--- /dev/null
++++ b/src/librbd/CacheImageCtx.h
+@@ -0,0 +1,40 @@
++#ifndef CEPH_LIBRBD_CACHEIMAGECTX_H
++#define CEPH_LIBRBD_CACHEIMAGECTX_H
++
++#include "librbd/ImageCtx.h"
++#include "librbd/AioCompletion.h"
++#include <rbc/librbc.h>
++
++namespace librbd {
++/*class C_CacheVolumeRead : public C_AioRequest {
++public:
++    C_CacheVolumeRead( CephContext *cct, AioCompletion *completion, char* data, uint64_t off, size_t len )
++        : C_AioRequest(cct, completion), m_data(data), m_off(off), m_len(len){}
++    virtual ~C_CacheVolumeRead() {}
++    virtual void finish(int r);
++  private:
++    char* m_data;
++    uint64_t m_off;
++    size_t len;
++}*/
++
++struct CacheImageCtx : ImageCtx {
++    std::string cached_image_name;
++    rbc::librbc* cache_inst;
++
++    CacheImageCtx(const std::string &image_name, const std::string &image_id,
++            const char *snap, const std::string &real_image_name, IoCtx& p, bool read_only);
++    void delete_CacheImageCtx();
++    void aio_write( AioCompletion *c,
++        uint64_t off, size_t len, const char *buf,
++        int op_flags );
++    void aio_read( AioCompletion *c,
++        uint64_t off, size_t len, char *buf,
++        int op_flags );
++
++
++};
++}
++
++
++#endif
+diff --git a/src/librbd/ImageCtx.cc b/src/librbd/ImageCtx.cc
+index 11422d8..9e218dc 100644
+--- a/src/librbd/ImageCtx.cc
++++ b/src/librbd/ImageCtx.cc
+@@ -188,7 +188,7 @@ struct C_InvalidateCache : public Context {
+       operations(new Operations<>(*this)),
+       exclusive_lock(nullptr), object_map(nullptr),
+       aio_work_queue(nullptr), op_work_queue(nullptr),
+-      asok_hook(nullptr)
++      asok_hook(nullptr), is_cache_volume(false)
+   {
+     md_ctx.dup(p);
+     data_ctx.dup(p);
+diff --git a/src/librbd/ImageCtx.h b/src/librbd/ImageCtx.h
+index 1855641..44bd73f 100644
+--- a/src/librbd/ImageCtx.h
++++ b/src/librbd/ImageCtx.h
+@@ -125,6 +125,7 @@ namespace librbd {
+     cls::rbd::GroupSpec group_spec;
+     uint64_t stripe_unit, stripe_count;
+     uint64_t flags;
++    bool is_cache_volume;
+ 
+     file_layout_t layout;
+ 
+diff --git a/src/librbd/ImageState.h b/src/librbd/ImageState.h
+index 412730e..fb95db5 100644
+--- a/src/librbd/ImageState.h
++++ b/src/librbd/ImageState.h
+@@ -23,7 +23,7 @@ template <typename ImageCtxT = ImageCtx>
+ class ImageState {
+ public:
+   ImageState(ImageCtxT *image_ctx);
+-  ~ImageState();
++  virtual ~ImageState();
+ 
+   int open();
+   void open(Context *on_finish);
+diff --git a/src/librbd/internal.cc b/src/librbd/internal.cc
+index fe8f0f4..eb8ece5 100644
+--- a/src/librbd/internal.cc
++++ b/src/librbd/internal.cc
+@@ -974,11 +974,20 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+     if (opts.get(RBD_IMAGE_OPTION_ORDER, &order) != 0 || order == 0)
+       order = cct->_conf->rbd_default_order;
+ 
++    bool cache_volume = cct->_conf->rbd_cache_volume_enable;
++    std::string cache_volume_name("");
++    std::string cache_volume_backend("");
++    if(cache_volume){
++        cache_volume_name = cct->_conf->rbd_cache_volume_name + "_" + imgname;
++        cache_volume_backend = cct->_conf->rbd_cache_volume_backend;
++    }
++
+     ldout(cct, 20) << "create " << &io_ctx << " name = " << imgname
+ 		   << " size = " << size << " old_format = " << old_format
+ 		   << " features = " << features << " order = " << order
+ 		   << " stripe_unit = " << stripe_unit
+ 		   << " stripe_count = " << stripe_count
++                   << " cache_volume = " << cache_volume
+ 		   << dendl;
+ 
+     if (features & ~RBD_FEATURES_ALL) {
+@@ -1044,8 +1053,27 @@ int mirror_image_disable_internal(ImageCtx *ictx, bool force,
+                 stripe_count, journal_order, journal_splay_width, journal_pool,
+                 non_primary_global_image_id, primary_mirror_uuid,
+                 &op_work_queue, &cond);
++
+       r = cond.wait();
+       op_work_queue.drain();
++
++
++      //create cache_volume
++      if( cache_volume ){
++          C_SaferCond cache_volume_cond;
++          ContextWQ cache_volume_op_work_queue("librbd::op_work_queue",
++                                cct->_conf->rbd_op_thread_timeout,
++                                ImageCtx::get_thread_pool_instance(cct));
++
++
++          create_v2(io_ctx, cache_volume_name, size, order, features, stripe_unit,
++                   stripe_count, journal_order, journal_splay_width,
++                    journal_pool, non_primary_global_image_id,
++                    primary_mirror_uuid, &cache_volume_op_work_queue, &cache_volume_cond);
++          r = cache_volume_cond.wait();
++          cache_volume_op_work_queue.drain();
++      }
++
+     }
+ 
+     int r1 = opts.set(RBD_IMAGE_OPTION_ORDER, order);
+diff --git a/src/librbd/librbd.cc b/src/librbd/librbd.cc
+index ebc656a..dad4944 100644
+--- a/src/librbd/librbd.cc
++++ b/src/librbd/librbd.cc
+@@ -1,4 +1,4 @@
+-// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*- 
++// -*- mode:C++; tab-width:8; c-basic-offset:2; indent-tabs-mode:t -*-
+ // vim: ts=8 sw=2 smarttab
+ /*
+  * Ceph - scalable distributed file system
+@@ -25,6 +25,7 @@
+ #include "cls/rbd/cls_rbd_client.h"
+ #include "librbd/Group.h"
+ #include "librbd/ImageCtx.h"
++#include "librbd/CacheImageCtx.h"
+ #include "librbd/ImageState.h"
+ #include "librbd/internal.h"
+ #include "librbd/Operations.h"
+@@ -1107,9 +1108,9 @@ namespace librbd {
+   bool Image::snap_exists(const char *snap_name)
+   {
+     ImageCtx *ictx = (ImageCtx *)ctx;
+-    tracepoint(librbd, snap_exists_enter, ictx, ictx->name.c_str(), 
++    tracepoint(librbd, snap_exists_enter, ictx, ictx->name.c_str(),
+       ictx->snap_name.c_str(), ictx->read_only, snap_name);
+-    bool exists; 
++    bool exists;
+     int r = librbd::snap_exists(ictx, snap_name, &exists);
+     tracepoint(librbd, snap_exists_exit, r, exists);
+     if (r < 0) {
+@@ -1123,7 +1124,7 @@ namespace librbd {
+   int Image::snap_exists2(const char *snap_name, bool *exists)
+   {
+     ImageCtx *ictx = (ImageCtx *)ctx;
+-    tracepoint(librbd, snap_exists_enter, ictx, ictx->name.c_str(), 
++    tracepoint(librbd, snap_exists_enter, ictx, ictx->name.c_str(),
+       ictx->snap_name.c_str(), ictx->read_only, snap_name);
+     int r = librbd::snap_exists(ictx, snap_name, exists);
+     tracepoint(librbd, snap_exists_exit, r, *exists);
+@@ -1745,7 +1746,7 @@ extern "C" int rbd_list(rados_ioctx_t p, char *names, size_t *size)
+     return -ERANGE;
+   }
+ 
+-  if (!names) 
++  if (!names)
+     return -EINVAL;
+ 
+   for (int i = 0; i < (int)cpp_names.size(); i++) {
+@@ -1865,6 +1866,14 @@ extern "C" int rbd_remove(rados_ioctx_t p, const char *name)
+   librbd::NoOpProgressContext prog_ctx;
+   int r = librbd::remove(io_ctx, name, "", prog_ctx);
+   tracepoint(librbd, remove_exit, r);
++  CephContext *cct = (CephContext* )io_ctx.cct();
++  string cache_volume_name = cct->_conf->rbd_cache_volume_name + "_" + name;
++  int r1 = librbd::remove(io_ctx, cache_volume_name.c_str(), "", prog_ctx);
++  if ((r == 0)&&(r1 == 0)){
++      r = 0;
++  }else{
++      r = -2;
++  }
+   return r;
+ }
+ 
+@@ -2002,8 +2011,38 @@ extern "C" int rbd_open(rados_ioctx_t p, const char *name, rbd_image_t *image,
+   librados::IoCtx io_ctx;
+   librados::IoCtx::from_rados_ioctx_t(p, io_ctx);
+   TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
+-  librbd::ImageCtx *ictx = new librbd::ImageCtx(name, "", snap_name, io_ctx,
+-						false);
++  //if this image has cache volume,
++  //should open cache_volume instead,
++  //and give read cache name to cache_volume
++  CephContext *cct = (CephContext* )io_ctx.cct();
++  librbd::ImageCtx *ictx;
++  if( cct->_conf->rbd_cache_volume_enable ){
++    string cache_volume_name = cct->_conf->rbd_cache_volume_name + "_" + name;
++    ictx = new librbd::CacheImageCtx(cache_volume_name,
++            "", snap_name, name, io_ctx, false);
++  }else{
++    ictx = new librbd::ImageCtx(name, "", snap_name, io_ctx, false);
++  }
++  tracepoint(librbd, open_image_enter, ictx, ictx->name.c_str(), ictx->id.c_str(), ictx->snap_name.c_str(), ictx->read_only);
++
++  int r = ictx->state->open();
++  if (r < 0) {
++    delete ictx;
++  } else {
++    *image = (rbd_image_t)ictx;
++  }
++  tracepoint(librbd, open_image_exit, r);
++  return r;
++}
++
++extern "C" int rbd_open_skip_cache(rados_ioctx_t p, const char *name,
++                                 rbd_image_t *image, const char *snap_name)
++{
++  librados::IoCtx io_ctx;
++  librados::IoCtx::from_rados_ioctx_t(p, io_ctx);
++  TracepointProvider::initialize<tracepoint_traits>(get_cct(io_ctx));
++  librbd::ImageCtx *ictx = new librbd::ImageCtx(name, "", snap_name, io_ctx, false);
++
+   tracepoint(librbd, open_image_enter, ictx, ictx->name.c_str(), ictx->id.c_str(), ictx->snap_name.c_str(), ictx->read_only);
+ 
+   int r = ictx->state->open();
+@@ -2071,10 +2110,15 @@ extern "C" int rbd_aio_open_read_only(rados_ioctx_t p, const char *name,
+ extern "C" int rbd_close(rbd_image_t image)
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
++  int r;
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx* cache_ctx = (librbd::CacheImageCtx *)image;
++      cache_ctx->delete_CacheImageCtx();
++      r = cache_ctx->state->close();
++      return r;
++  }
+   tracepoint(librbd, close_image_enter, ictx, ictx->name.c_str(), ictx->id.c_str());
+-
+-  int r = ictx->state->close();
+-
++  r = ictx->state->close();
+   tracepoint(librbd, close_image_exit, r);
+   return r;
+ }
+@@ -2094,7 +2138,21 @@ extern "C" int rbd_resize(rbd_image_t image, uint64_t size)
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   tracepoint(librbd, resize_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, size);
+   librbd::NoOpProgressContext prog_ctx;
+-  int r = ictx->operations->resize(size, true, prog_ctx);
++  int r;
++  if(ictx->is_cache_volume){
++      r = ictx->operations->resize(size, true, prog_ctx);
++      librbd::CacheImageCtx *cache_ictx = (librbd::CacheImageCtx *)ictx;
++      ictx = new librbd::ImageCtx(cache_ictx->cached_image_name, "", cache_ictx->snap_name.c_str(), cache_ictx->data_ctx, cache_ictx->read_only);
++      r = ictx->state->open();
++      if(r == 0){
++          r = ictx->operations->resize(size, true, prog_ctx);
++          r = ictx->state->close();
++      }else{
++          delete ictx;
++      }
++  }else{
++      r = ictx->operations->resize(size, prog_ctx);
++  }
+   tracepoint(librbd, resize_exit, r);
+   return r;
+ }
+@@ -2126,7 +2184,21 @@ extern "C" int rbd_stat(rbd_image_t image, rbd_image_info_t *info,
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   tracepoint(librbd, stat_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only);
+-  int r = librbd::info(ictx, *info, infosize);
++  int r;
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx *cache_ictx = (librbd::CacheImageCtx *)ictx;
++      ictx = new librbd::ImageCtx(cache_ictx->cached_image_name, "", cache_ictx->snap_name.c_str(), cache_ictx->data_ctx, cache_ictx->read_only);
++      r = ictx->state->open();
++      if( r == 0 ){
++          r = librbd::info(ictx, *info, infosize);
++          r = ictx->state->close();
++      }else{
++          delete ictx;
++      }
++  }else{
++      r = librbd::info(ictx, *info, infosize);
++  }
++
+   tracepoint(librbd, stat_exit, r, info);
+   return r;
+ }
+@@ -2759,9 +2831,15 @@ extern "C" int rbd_aio_write(rbd_image_t image, uint64_t off, size_t len,
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   librbd::RBD::AioCompletion *comp = (librbd::RBD::AioCompletion *)c;
+-  tracepoint(librbd, aio_write_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
+-  ictx->aio_work_queue->aio_write(get_aio_completion(comp), off, len, buf, 0);
+-  tracepoint(librbd, aio_write_exit, 0);
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx *cache_ctx = (librbd::CacheImageCtx *)image;
++      cache_ctx->aio_write( get_aio_completion(comp), off, len, buf, 0 );
++  }else{
++      tracepoint(librbd, aio_write_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
++      ictx->aio_work_queue->aio_write(get_aio_completion(comp), off, len, buf, 0);
++      tracepoint(librbd, aio_write_exit, 0);
++  }
++
+   return 0;
+ }
+ 
+@@ -2795,10 +2873,15 @@ extern "C" int rbd_aio_read(rbd_image_t image, uint64_t off, size_t len,
+ {
+   librbd::ImageCtx *ictx = (librbd::ImageCtx *)image;
+   librbd::RBD::AioCompletion *comp = (librbd::RBD::AioCompletion *)c;
+-  tracepoint(librbd, aio_read_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
+-  ictx->aio_work_queue->aio_read(get_aio_completion(comp), off, len, buf, NULL,
+-                                 0);
+-  tracepoint(librbd, aio_read_exit, 0);
++  if(ictx->is_cache_volume){
++      librbd::CacheImageCtx *cache_ctx = (librbd::CacheImageCtx *)image;
++      cache_ctx->aio_read( get_aio_completion(comp), off, len, buf, 0 );
++  }else{
++      tracepoint(librbd, aio_read_enter, ictx, ictx->name.c_str(), ictx->snap_name.c_str(), ictx->read_only, off, len, buf, comp->pc);
++      ictx->aio_work_queue->aio_read(get_aio_completion(comp), off, len, buf, NULL,
++                                  0);
++      tracepoint(librbd, aio_read_exit, 0);
++  }
+   return 0;
+ }
+ 
+diff --git a/src/rbd_replay/CMakeLists.txt b/src/rbd_replay/CMakeLists.txt
+index 3a05b9a..2d795ce 100644
+--- a/src/rbd_replay/CMakeLists.txt
++++ b/src/rbd_replay/CMakeLists.txt
+@@ -37,6 +37,7 @@ if(${WITH_BABELTRACE})
+     babeltrace
+     babeltrace-ctf
+     udev
++    boost_serialization
+     ${Boost_DATE_TIME_LIBRARY}
+     )
+   install(TARGETS rbd-replay-prep DESTINATION bin)
+diff --git a/src/test/librbd/CMakeLists.txt b/src/test/librbd/CMakeLists.txt
+index e2c84e3..b6c9492 100644
+--- a/src/test/librbd/CMakeLists.txt
++++ b/src/test/librbd/CMakeLists.txt
+@@ -80,6 +80,7 @@ target_link_libraries(unittest_librbd
+   osdc
+   global
+   ${UNITTEST_LIBS}
++  boost_serialization rbc
+   radostest)
+ 
+ add_executable(ceph_test_librbd
+@@ -99,6 +100,7 @@ target_link_libraries(ceph_test_librbd
+   cls_lock_client
+   osdc
+   global
++  boost_serialization rbc
+   ${UNITTEST_LIBS}
+   radostest)
+ set_target_properties(ceph_test_librbd PROPERTIES COMPILE_FLAGS
+diff --git a/src/test/rbd_mirror/CMakeLists.txt b/src/test/rbd_mirror/CMakeLists.txt
+index b2a1d80..b3baa52 100644
+--- a/src/test/rbd_mirror/CMakeLists.txt
++++ b/src/test/rbd_mirror/CMakeLists.txt
+@@ -50,7 +50,7 @@ target_link_libraries(unittest_rbd_mirror
+   librados
+   osdc
+   global
+-  radostest
++  radostest boost_serialization rbc
+   )
+ 
+ add_executable(ceph_test_rbd_mirror
+@@ -73,7 +73,7 @@ target_link_libraries(ceph_test_rbd_mirror
+   rbd_types
+   osdc
+   global
+-  radostest
++  radostest boost_serialization rbc
+   ${UNITTEST_LIBS}
+   )
+ 
+diff --git a/src/tools/rbd_mirror/CMakeLists.txt b/src/tools/rbd_mirror/CMakeLists.txt
+index 459f457..8d719b7 100644
+--- a/src/tools/rbd_mirror/CMakeLists.txt
++++ b/src/tools/rbd_mirror/CMakeLists.txt
+@@ -39,5 +39,5 @@ target_link_libraries(rbd-mirror
+   cls_rbd_client
+   cls_lock_client
+   cls_journal_client
+-  global)
++  global boost_serialization rbc)
+ install(TARGETS rbd-mirror DESTINATION bin)
+diff --git a/src/tools/rbd_nbd/CMakeLists.txt b/src/tools/rbd_nbd/CMakeLists.txt
+index a339b38..cae671d 100644
+--- a/src/tools/rbd_nbd/CMakeLists.txt
++++ b/src/tools/rbd_nbd/CMakeLists.txt
+@@ -1,4 +1,4 @@
+ add_executable(rbd-nbd rbd-nbd.cc)
+-target_link_libraries(rbd-nbd librbd librados global
++target_link_libraries(rbd-nbd librbd librados global boost_serialization
+   ${Boost_REGEX_LIBRARY})
+ install(TARGETS rbd-nbd DESTINATION bin)
+-- 
+1.9.1
+

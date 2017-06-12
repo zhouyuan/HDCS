@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% block title %}{% trans "RBD Status: " %}{{ rbd_name }}{% endblock %}
+
+{% block page_header %}
+    <link href="{{ STATIC_URL }}dashboard/css/common.css" rel="stylesheet">
+    <link href="{{ STATIC_URL }}dashboard/css/rbd_cache_config.css" rel="stylesheet">
+{% endblock page_header %}
+
+{% block main %}
+    {% csrf_token %}
+     <!--The frame work of dashboard-->
+    <div id="framework">
+        <!--the main area-->
+        <div id="divMain">
+
+            <!--RBD Cache Config-->
+            <div id="divRBDCacheConfig" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "RBD Cache Config" %}</h4>
+                <div id="divRBDCacheConfigContent" class="hsm-block-content">
+                    <table id="tRBDCacheConfig" style="width:700px; height:380px;" title={{rbd_id}}>
+                        <tbody>
+                        <tr style="height:30px;">
+                            <td style="width:250px;text-align:left;font-weight:bold;">Cache Dir</td>
+                            <td id="ldRBDCacheDir" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Clean Start:</td>
+                            <td id="ldRBDCleanStart" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Enable Memory Usage Tracker</td>
+                            <td id="ldRBDEnableMemoryUsageTracker" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Object Size</td>
+                            <td id="ldRBDObjectSize" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Total Size</td>
+                            <td id="ldRBDCacheTotalSize" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Dirty Ratio Min</td>
+                            <td id="ldRBDCacheDirtyRatioMin" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Ratio Health</td>
+                            <td id="ldRBDCacheRatioHealth" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Ratio Max</td>
+                            <td id="ldRBDCacheRatioMax" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Flush Interval</td>
+                            <td id="ldRBDCacheFlushInterval" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Evict Interval</td>
+                            <td id="ldRBDCacheEvictInterval" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Flush Queue Depth</td>
+                            <td id="ldRBDCacheFlushQueueDepth" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Agent Threads Num</td>
+                            <td id="ldRBDAgentThreadsNum" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Cache Service Threads Num</td>
+                            <td id="ldRBDCacheServiceThreadsNum" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Messenger Port</td>
+                            <td id="ldRBDMessengerPort" style="text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:30px;">
+                            <td style="text-align:left;font-weight:bold;">Log To File</td>
+                            <td id="ldRBDLogToFile" style="text-align:left;">--</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <div id="divFooter" style="width:100%;height:60px;clear:both">
+    </div>
+{% endblock %}
+{% block js %}
+    {{ block.super }}
+    <script src="{{ STATIC_URL }}lib/echarts.js"></script>
+    <script src="{{ STATIC_URL }}dashboard/js/message.js"></script>
+    <script src="{{ STATIC_URL }}dashboard/js/rbd_cache_config.js"></script>
+{% endblock %}

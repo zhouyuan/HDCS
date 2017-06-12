@@ -1,0 +1,69 @@
+function _install_hsm_rpm_dep_package() {
+    sudo yum install -y `cat $1 | grep BuildRequires | awk '{print $2}' | tr "\n" " "`
+    sudo yum install -y rpm-build
+}
+
+function _setup_hsm_rpm() {
+    rm -rf $TEMP/*
+    local old_dir=`pwd`
+    local version=`cat VERSION`
+
+    cp -rf $TOPDIR/$SOURCE_DIR/$HSM_DIR $TEMP/
+    cd $TEMP/
+
+    if [[ $HSM_DIR != hsm-$version ]]; then
+        mv $HSM_DIR hsm-$version
+    fi
+
+    [[ -e hsm-$version/build ]] && rm -rf hsm-$version/build
+
+    tar zcf hsm-${version}.tar.gz hsm-$version
+    cp -rf hsm-${version}.tar.gz ~/rpmbuild/SOURCES/
+    cp -rf hsm-$version/hsm.spec ~/rpmbuild/SPECS/
+    _install_hsm_rpm_dep_package hsm-$version/hsm.spec
+    cd ~/rpmbuild/SPECS/
+    rpmbuild -bb hsm.spec
+
+    cd $old_dir
+}
+
+function build_hsm_rpm() {
+    _setup_hsm_rpm
+}
+
+function _install_hsm_deb_dep_package() {
+    sudo apt-get install -y debhelper
+    sudo apt-get install -y python-setuptools python-pbr
+}
+
+function _setup_hsm_deb() {
+    rm -rf $TEMP/*
+    local old_dir=`pwd`
+    local version=$VERSION
+    local release=$RELEASE
+
+    cp -rf $TOPDIR/$SOURCE_DIR/$HSM_DIR $TEMP/
+    cd $TEMP/
+
+    if [[ $HSM_DIR != hsm-$version ]]; then
+        mv $HSM_DIR hsm-$version
+    fi
+
+    [[ -e hsm-$version/build ]] && rm -rf hsm-$version/build
+
+    sed -i "s,2016.12-1.2,$version-$release,g" hsm-$version/debian/rules
+    sed -i "s,%VERSION%,$version,g" hsm-$version/install-hsm.sh
+    sed -i "s,%RELEASE%,$release,g" hsm-$version/install-hsm.sh
+
+    cd hsm-$version
+    _install_hsm_deb_dep_package
+    fakeroot debian/rules binary-arch
+    cd ..
+    cp *.deb $TOPDIR/hsmrepo
+
+    cd $old_dir
+}
+
+function build_hsm_deb() {
+    _setup_hsm_deb
+}

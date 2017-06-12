@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+
+TOPDIR=$(cd $(dirname "$0") && pwd)
+
+apt-get --version >/dev/null 2>&1 && IS_UBUNTU=1
+
+function preinstall_controller() {
+    if [[ ${IS_UBUNTU} != 1 ]]; then
+        yum install -y python-openstackclient mariadb mariadb-server python2-PyMySQL \
+        rabbitmq-server openstack-keystone httpd mod_wsgi ntp crudini expect redhat-lsb
+    else
+        # disable the keystone service from starting automatically after installation
+        echo "manual" > /etc/init/keystone.override
+        export DEBIAN_FRONTEND=noninteractive
+        apt-get install -y python-openstackclient mariadb-server python-pymysql \
+        rabbitmq-server keystone apache2 libapache2-mod-wsgi ntp crudini expect lsb-release
+    fi
+}
+
+function preinstall_agent() {
+    if [[ ${IS_UBUNTU} != 1 ]]; then
+        yum install -y ntp expect crudini redhat-lsb
+    else
+        apt-get install -y python-support python-pymysql ntp expect crudini lsb-release
+    fi
+}
+
+if [[ $1 ]]; then
+    if [[ $1 == "agent" ]]; then
+        preinstall_agent
+    else
+        preinstall_controller
+    fi
+else
+    preinstall_controller
+fi

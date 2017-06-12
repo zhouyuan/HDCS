@@ -1,0 +1,16 @@
+Source: hsm
+Section: python
+Priority: optional
+Maintainer: intel <intel@intel.com>
+Build-Depends: cdbs, debhelper (>= 8.0.0)
+Standards-Version: 3.9.4
+XS-Python-Version: all
+
+Package: hsm
+Architecture: amd64
+Depends: python, python-mysqldb, python-pbr, python-sqlalchemy, python-amqplib,
+    python-anyjson, python-eventlet, python-kombu, python-lxml, python-routes,
+    python-webob, python-greenlet, python-paste, python-pastedeploy, python-migrate,
+    python-stevedore, python-paramiko, python-iso8601, python-oslo.config, python-psutil
+Description: Hyperstash Manager (HSM) is software that Intel has developed
+    to help to manage Hyperstash(which is a Client Side Cache).

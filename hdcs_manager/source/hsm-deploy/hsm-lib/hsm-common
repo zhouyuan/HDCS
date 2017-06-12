@@ -1,0 +1,68 @@
+#!/usr/bin/env bash
+
+function mysql_cmd() {
+    set +o xtrace
+    mysql -u${MYSQL_ROOT_USER} -p${MYSQL_ROOT_PASSWORD} -h${MYSQL_HOST} -e "$@" >/dev/null 2>&1
+    if [[ $? -gt 0 ]]; then
+        ssh -t ${MYSQL_HOST} "mysql -u${MYSQL_ROOT_USER} -p${MYSQL_ROOT_PASSWORD} -e \"$@\""
+    fi
+    set -o xtrace
+}
+
+function unset_proxy() {
+    unset http_proxy
+    unset https_proxy
+    unset ftp_proxy
+}
+
+function stop_firewalld() {
+    set +o xtrace
+    systemctl stop firewalld.service
+    systemctl disable firewalld.service
+    set -o xtrace
+}
+
+function disable_selinux() {
+    set +o xtrace
+    sed -i "s,SELINUX=*.*,SELINUX=disabled,g" /etc/selinux/config
+    if [[ `getenforce` != "Disable" ]]; then
+        setenforce 0
+    fi
+    set -o xtrace
+}
+
+function set_sshd() {
+    set +o xtrace
+    cat <<"EOF" > /etc/ssh/ssh_config
+UserKnownHostsFile /dev/null
+ConnectTimeout 15
+StrictHostKeyChecking no
+EOF
+    systemctl restart sshd.service
+    set -o xtrace
+}
+
+function ssh_root_key_gen() {
+    set +o xtrace
+    if [[ ! -d /root/.ssh ]]; then
+        mkdir /root/.ssh
+    fi
+    chmod +x ${TOPDIR}/hsm-lib/exp_ssh_key
+    if [[ ! -e /root/.ssh/id_rsa ]]; then
+        ${TOPDIR}/hsm-lib/exp_ssh_key
+    fi
+    if [[ ! -e /root/.ssh/authorized_keys ]]; then
+        touch /root/.ssh/authorized_keys
+    fi
+    chmod +x /root/.ssh/authorized_keys
+    set -o xtrace
+}
+
+function os_check() {
+    distributor_id=`lsb_release -i|awk -F " " {'print $3'}`
+    if [[ ${distributor_id} == "Ubuntu" ]]; then
+        echo "ubuntu"
+    elif [[ ${distributor_id} == "CentOS" ]]; then
+        echo "centos"
+    fi
+}

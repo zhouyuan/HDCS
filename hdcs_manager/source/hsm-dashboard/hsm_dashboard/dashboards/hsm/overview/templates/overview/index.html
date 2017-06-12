@@ -1,0 +1,122 @@
+{% extends 'base.html' %}
+{% load i18n %}
+{% block title %}{% trans "Cluster Status" %}{% endblock %}
+
+{% block page_header %}
+    <link href="{{ STATIC_URL }}dashboard/css/common.css" rel="stylesheet">
+    <link href="{{ STATIC_URL }}dashboard/css/overview.css" rel="stylesheet">
+{% endblock page_header %}
+
+{% block main %}
+    {% csrf_token %}
+     <!--The frame work of dashboard-->
+    <div id="framework">
+        <!--the main area-->
+        <div id="divMain">
+
+            <!--HSM Summary-->
+            <div id="divHSMSummaryInfo" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "HSM Summary" %}</h4>
+                <div id="divHSMSummaryInfoContent" class="hsm-block-content">
+                    <table id="tHSMSummaryInfo" style="width:470px; height:150px;">
+                        <tbody>
+                        <tr style="height:25px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">HSM Version:</td>
+                            <td style="width:5px;"></td>
+                            <td id="ldHSMVersion" style="width:140px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">Ceph Version:</td>
+                            <td style="width:5px;"></td>
+                            <td id="ldCephVersion" style="width:140px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">Total Hyperstash Instances:</td>
+                            <td style="width:5px;"></td>
+                            <td id="ldTotalHyperstashInstances" style="width:140px;text-align:left;">--</td>
+                        </tr>
+                        <tr style="height:25px;">
+                            <td style="width:120px;text-align:right;font-weight:bold;">Total RBDs:</td>
+                            <td style="width:5px;"></td>
+                            <td id="ldTotalRBDs" style="width:140px;text-align:left;">--</td>
+                        </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!--Cache I/O Workload-->
+            <div id="divCacheIOWorkload" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "Cache I/O Workload" %}</h4>
+                <div id="divCacheIOWorkloadContent" class="hsm-block-content">
+                    <table id="tCacheIOWorkloadInfo" style="width:470px;">
+                        <tbody>
+                        <tr>
+                            <td>
+                                <table>
+                                    <tr>
+                                        <td style="width:30px;height:110px;font-size:28px;font-weight:bold;">BW: </td>
+                                        <td id="ldBW" style="width:80px;height:110px;font-size:28px;font-weight:bold;text-align:center;">--</td>
+                                        <td style="width:125px;height:110px;font-size:18px;">MB/s</td>
+                                    </tr>
+                                </table>
+                            </td>
+                            <td>
+                                <table>
+                                    <tr>
+                                        <td style="width:60px;height:26px"></td>
+                                        <td style="width:85px;height:26px;text-align:center">Total IOPs</td>
+                                        <td style="width:5px;height:26px"></td>
+                                        <td style="width:85px;height:26px;text-align:center">Miss IOPs</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="width:60px;height:32px;text-align:center;">Read</td>
+                                        <td id="ldCacheReadIOPS" style="width:85px;height:26px;background-color:#CCCCCC;text-align:center;font-size:12px;font-weight:bold;">--</td>
+                                        <td style="width:5px;height:26px"></td>
+                                        <td id="ldCacheReadMissIOPS" style="width:85px;height:26px;background-color:#CCCCCC;text-align:center;font-size:12px;font-weight:bold;">--</td>
+                                    </tr>
+                                    <tr style="height: 5px;"></tr>
+                                    <tr>
+                                        <td style="width:60px;height:32px;text-align:center;">Write</td>
+                                        <td id="ldCacheWriteIOPS" style="width:85px;height:26px;background-color:#CCCCCC;text-align:center;font-size:12px;font-weight:bold;">--</td>
+                                        <td style="width:5px;height:26px"></td>
+                                        <td id="ldCacheWriteMissIOPS" style="width:85px;height:26px;background-color:#CCCCCC;text-align:center;font-size:12px;font-weight:bold;">--</td>
+                                    </tr>
+                                    <tr style="height: 5px;"></tr>
+                                    <tr>
+                                        <td style="width:60px;height:32px;text-align:center;">Total</td>
+                                        <td id="ldCacheTotalIOPS" style="width:85px;height:26px;background-color:#CCCCCC;text-align:center;font-size:12px;font-weight:bold;">--</td>
+                                        <td style="width:5px;height:26px"></td>
+                                        <td id="ldCacheTotalMissIOPS" style="width:85px;height:26px;background-color:#CCCCCC;text-align:center;font-size:12px;font-weight:bold;">--</td>
+                                    </tr>
+                                </table>
+                            </td>
+                        </tr>
+                        </tbody>
+                    </table>
+                    <span id="ldLatencyMark" style="min-width:50px;display:inline-block;margin-right:10px;">Latency:</span>
+                    <span id="ldLatency" class="hsm-label-90">--</span>
+                </div>
+            </div>
+
+            <!--Cache Ratio-->
+            <div id="divCacheRatio" class="hsm-block">
+                <h4 class="hsm-block-title">{% trans "Cache Ratio" %}</h4>
+                <div id="divCacheRatioContent" class="hsm-block-content">
+                    <br />
+                    <div id="divCacheRatioRect">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+    <div id="divFooter" style="width:100%;height:60px;clear:both">
+    </div>
+{% endblock %}
+{% block js %}
+    {{ block.super }}
+    <script src="{{ STATIC_URL }}lib/echarts.js"></script>
+    <script src="{{ STATIC_URL }}dashboard/js/message.js"></script> 
+    <script src="{{ STATIC_URL }}dashboard/js/overview.js"></script>
+{% endblock %}

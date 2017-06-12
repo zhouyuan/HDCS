@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+
+getent group hsm >/dev/null || groupadd -r hsm --gid 265
+if ! getent passwd hsm >/dev/null; then
+  useradd -u 265 -r -g hsm -G hsm,nogroup -d /var/lib/hsm -s /usr/sbin/nologin -c "Hsm Storage Services" hsm
+fi

@@ -1,0 +1,15 @@
+#!/usr/bin/env bash
+
+hsm_filters=/etc/hsm/rootwrap.d/hsm.filters
+
+if [[ -f /usr/local/bin/hsm ]]; then
+    sed -i "s/\/usr\/bin\/hsm/\/usr\/local\/bin\/hsm/g" ${hsm_filters}
+fi
+
+if [[ -f /usr/local/bin/ceph ]]; then
+    sed -i "s/\/usr\/bin\/ceph/\/usr\/local\/bin\/ceph/g" ${hsm_filters}
+fi
+
+if [[ -f /usr/local/bin/rbd ]]; then
+    sed -i "s/\/usr\/bin\/rbd/\/usr\/local\/bin\/rbd/g" ${hsm_filters}
+fi

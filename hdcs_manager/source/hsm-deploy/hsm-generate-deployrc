@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+
+#-------------------------------------------------------------------------------
+#            Usage
+#-------------------------------------------------------------------------------
+
+function usage() {
+    cat << EOF
+Usage: hsm-generate-deployrc --controller <ip>
+                             [--mysql-host <mysql-host>]
+                             [--mysql-root-user <mysql-root-user>]
+                             [--mysql-root-password <mysql-root-password>]
+                             [--rabbitmq-host <rabbitmq-host>]
+                             [--rabbitmq-user <rabbitmq-user>]
+                             [--rabbitmq-password <rabbitmq-password>]
+                             [--rabbitmq-port <rabbitmq-port>]
+                             [--mysql-keystone-user <mysql-keystone-user>]
+                             [--mysql-keystone-password <mysql-keystone-password>]
+                             [--keystone-host <keystone-host>]
+                             [--admin-token <admin-token>]
+                             [--admin-user <admin-user>]
+                             [--admin-password <admin-password>]
+
+Options:
+  --help | -h
+    Print usage information.
+  --controller [ip or hostname]
+    Installing the controller node only.
+  --mysql-host [mysql-host]
+    MySQL host.
+  --mysql-root-user [mysql-root-user]
+    MySQL root user.
+  --mysql-root-password [mysql-root-password]
+    MySQL root password.
+  --rabbitmq-host [rabbitmq-host]
+    RabbitMQ host.
+  --rabbitmq-user [rabbitmq-user]
+    RabbitMQ user.
+  --rabbitmq-password [rabbitmq-password]
+    RabbitMQ password.
+  --rabbitmq-port [rabbitmq-port]
+    RabbitMQ port.
+  --mysql-keystone-user [mysql-keystone-user]
+    MySQL keystone user.
+  --mysql-keystone-password [mysql-keystone-password]
+    MySQL keystone password.
+  --keystone-host [keystone-host]
+    Keystone host.
+  --admin-token [admin-token]
+    Admin token.
+  --admin-user [admin-user]
+    Admin user.
+  --admin-password [admin-password]
+    Admin password.
+EOF
+    exit 0
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -h| --help) usage ;;
+    --controller) shift; CONTROLLER_NODE_IP=$1 ;;
+    --mysql-host) shift; MYSQL_HOST=$1 ;;
+    --mysql-root-user) shift; MYSQL_ROOT_USER=$1 ;;
+    --mysql-root-password) shift; MYSQL_ROOT_PASSWORD=$1 ;;
+    --rabbitmq-host) shift; RABBITMQ_HOST=$1 ;;
+    --rabbitmq-user) shift; RABBITMQ_USER=$1 ;;
+    --rabbitmq-password) shift; RABBITMQ_PASSWORD=$1 ;;
+    --rabbitmq-port) shift; RABBITMQ_PORT=$1 ;;
+    --mysql-keystone-user) shift; MYSQL_KEYSTONE_USER=$1 ;;
+    --mysql-keystone-password) shift; MYSQL_KEYSTONE_PASSWORD=$1 ;;
+    --keystone-host) shift; KEYSTONE_HOST=$1 ;;
+    --admin-token) shift; ADMIN_TOKEN=$1 ;;
+    --admin-user) shift; ADMIN_USER=$1 ;;
+    --admin-password) shift; ADMIN_PASSWORD=$1 ;;
+    *) shift ;;
+  esac
+  shift
+done
+
+
+set -o xtrace
+
+while [[ ! ${CONTROLLER_NODE_IP} ]]; do
+    echo -e "Input controller node management ip: "
+    read CONTROLLER_NODE_IP
+done
+
+function check_ip() {
+    local cnt=0
+    for n in `hostname -I`; do
+        if [[ ${CONTROLLER_NODE_IP} == ${n} ]]; then
+            let cnt=cnt+1
+        fi
+    done
+    echo ${cnt}
+}
+
+while [[ `check_ip` -eq 0 ]]; do
+    echo -e "Wrong ip. Plesae re-input controller node management ip: "
+    read CONTROLLER_NODE_IP
+done
+
+
+TOPDIR=$(cd $(dirname "$0") && pwd)
+
+if [[ ! -d /etc/hsmdeploy ]]; then
+    mkdir -p /etc/hsmdeploy
+fi
+DEPLOYRC=/etc/hsmdeploy/deployrc
+if [[ -f ${DEPLOYRC} ]]; then
+    echo -e "The deployrc file exists."
+    echo -e "Delete it or not, y/n: "
+#    read DELETE_OR_NOT
+#    if [[ ${DELETE_OR_NOT} == "y" ]]; then
+#        rm -rf ${DEPLOYRC}
+#        echo -e "Delete the old file and generate a new one."
+#    else
+    echo -e "Nothing to do, just exit."
+    exit 0
+#    fi
+fi
+
+cat <<EOF >${DEPLOYRC}
+#---------------------------------------------
+# MySQL
+#---------------------------------------------
+SETUP_MYSQL=True
+MYSQL_HOST=%MYSQL_HOST%
+MYSQL_ROOT_USER=root
+MYSQL_ROOT_PASSWORD=%MYSQL_ROOT_PASSWORD%
+
+#---------------------------------------------
+# RabbitMQ
+#---------------------------------------------
+SETUP_RABBITMQ=True
+RABBITMQ_HOST=%RABBITMQ_HOST%
+RABBITMQ_USER=hsm
+RABBITMQ_PASSWORD=%RABBITMQ_PASSWORD%
+RABBITMQ_PORT=5672
+
+#---------------------------------------------
+# HTTPS
+#---------------------------------------------
+HSM_HTTPS_PASSWORD=%HSM_HTTPS_PASSWORD%
+
+#---------------------------------------------
+# Keystone
+#---------------------------------------------
+SETUP_KEYSTONE=True
+MYSQL_KEYSTONE_USER=keystone
+MYSQL_KEYSTONE_PASSWORD=%MYSQL_KEYSTONE_PASSWORD%
+KEYSTONE_HOST=%KEYSTONE_HOST%
+ADMIN_TOKEN=%ADMIN_TOKEN%
+ADMIN_USER=admin
+ADMIN_PASSWORD=%ADMIN_PASSWORD%
+DEMO_USER=demo
+DEMO_PASSWORD=%DEMO_PASSWORD%
+
+#---------------------------------------------
+# HSM
+#---------------------------------------------
+HSM_HOST=%HSM_HOST%
+HSM_CONTROLLER_SERVICES=hsm-api,hsm-scheduler,hsm-conductor
+HSM_AGENT_SERVICES=hsm-agent
+MYSQL_HSM_USER=hsm
+MYSQL_HSM_PASSWORD=%MYSQL_HSM_PASSWORD%
+KEYSTONE_HSM_SERVICE_USER=hsm
+KEYSTONE_HSM_SERVICE_PASSWORD=%KEYSTONE_HSM_SERVICE_PASSWORD%
+KEYSTONE_HSM_SERVICE=hsm
+
+EOF
+
+if [[ ${MYSQL_HOST} ]]; then
+    sed -i "s,SETUP_MYSQL=True,SETUP_MYSQL=False,g" ${DEPLOYRC}
+    sed -i "s,%MYSQL_HOST%,${MYSQL_HOST},g" ${DEPLOYRC}
+else
+    sed -i "s,%MYSQL_HOST%,${CONTROLLER_NODE_IP},g" ${DEPLOYRC}
+fi
+if [[ ${MYSQL_ROOT_USER} ]]; then
+    sed -i "s,MYSQL_ROOT_USER=root,MYSQL_ROOT_USER=${MYSQL_ROOT_USER},g" ${DEPLOYRC}
+fi
+if [[ ${MYSQL_ROOT_PASSWORD} ]]; then
+    sed -i "s,%MYSQL_ROOT_PASSWORD%,${MYSQL_ROOT_PASSWORD},g" ${DEPLOYRC}
+else
+    sed -i "s,%MYSQL_ROOT_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+fi
+if [[ ${RABBITMQ_HOST} ]]; then
+    sed -i "s,SETUP_RABBITMQ=True,SETUP_RABBITMQ=False,g" ${DEPLOYRC}
+    sed -i "s,%RABBITMQ_HOST%,${RABBITMQ_HOST},g" ${DEPLOYRC}
+else
+    sed -i "s,%RABBITMQ_HOST%,${CONTROLLER_NODE_IP},g" ${DEPLOYRC}
+fi
+if [[ ${RABBITMQ_USER} ]]; then
+    sed -i "s,RABBITMQ_USER=hsm,RABBITMQ_USER=${RABBITMQ_USER},g" ${DEPLOYRC}
+fi
+if [[ ${RABBITMQ_PASSWORD} ]]; then
+    sed -i "s,%RABBITMQ_PASSWORD%,${RABBITMQ_PASSWORD},g" ${DEPLOYRC}
+else
+    sed -i "s,%RABBITMQ_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+fi
+if [[ ${RABBITMQ_PORT} ]]; then
+    sed -i "s,RABBITMQ_PORT=5672,RABBITMQ_PORT=${RABBITMQ_PORT},g" ${DEPLOYRC}
+fi
+sed -i "s,%HSM_HTTPS_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+if [[ ${MYSQL_KEYSTONE_USER} ]]; then
+    sed -i "s,MYSQL_KEYSTONE_USER=keystone,MYSQL_KEYSTONE_USER=${MYSQL_KEYSTONE_USER},g" ${DEPLOYRC}
+fi
+if [[ ${MYSQL_KEYSTONE_PASSWORD} ]]; then
+    sed -i "s,%MYSQL_KEYSTONE_PASSWORD%,${MYSQL_KEYSTONE_PASSWORD},g" ${DEPLOYRC}
+else
+    sed -i "s,%MYSQL_KEYSTONE_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+fi
+if [[ ${KEYSTONE_HOST} ]]; then
+    sed -i "s,SETUP_KEYSTONE=True,SETUP_KEYSTONE=False,g" ${DEPLOYRC}
+    sed -i "s,%KEYSTONE_HOST%,${KEYSTONE_HOST},g" ${DEPLOYRC}
+else
+    sed -i "s,%KEYSTONE_HOST%,${CONTROLLER_NODE_IP},g" ${DEPLOYRC}
+fi
+if [[ ${ADMIN_TOKEN} ]]; then
+    sed -i "s,%ADMIN_TOKEN%,${ADMIN_TOKEN},g" ${DEPLOYRC}
+else
+    sed -i "s,%ADMIN_TOKEN%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+fi
+if [[ ${ADMIN_USER} ]]; then
+    sed -i "s,ADMIN_USER=admin,ADMIN_USER=${ADMIN_USER},g" ${DEPLOYRC}
+fi
+if [[ ${ADMIN_PASSWORD} ]]; then
+    sed -i "s,%ADMIN_PASSWORD%,${ADMIN_PASSWORD},g" ${DEPLOYRC}
+else
+    sed -i "s,%ADMIN_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+fi
+sed -i "s,%DEMO_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+sed -i "s,%HSM_HOST%,${CONTROLLER_NODE_IP},g" ${DEPLOYRC}
+sed -i "s,%MYSQL_HSM_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+sed -i "s,%KEYSTONE_HSM_SERVICE_PASSWORD%,`openssl rand -hex 10`,g" ${DEPLOYRC}
+
+set +o xtrace

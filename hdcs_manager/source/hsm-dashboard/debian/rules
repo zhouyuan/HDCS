@@ -1,0 +1,27 @@
+#!/usr/bin/make -f
+
+binary: clean install
+	dh_makeshlibs
+	dh_shlibdeps
+	dh_installdeb
+	dh_gencontrol
+	dh_md5sums
+
+	sed -i 's,Version: 2016.12-1,Version: 2016.12-1.2,g' debian/hsm-dashboard/DEBIAN/control
+	rm -rf debian/hsm-dashboard/DEBIAN/conffiles
+
+	dh_builddeb
+
+binary-indep: binary
+
+binary-arch: binary
+
+clean:
+	rm -rf build
+	#dh_auto_clean
+	rm -rf ./debian/hsm-dashboard
+
+install:
+	./install-hsm-dashboard.sh
+
+.PHONY: build clean binary-indep binary-arch binary install

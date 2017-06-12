@@ -1,0 +1,66 @@
+#divPoolForm{
+	width:720px;
+	border:1px solid #ccc;
+	overflow: hidden;
+	padding: 5px;
+}
+
+#divFormOptions{
+	width:700px;
+	height: 50px;
+	line-height: 50px;
+	clear: both;
+}
+
+.control-group{
+	margin-top: 10px;
+}
+
+#framework
+{
+    text-align: left;
+    margin-left:5px;
+}
+
+#divHSMSummaryInfo{
+    width: 500px;
+}
+
+#divHSMSummaryInfoContent{
+    height: 180px;
+}
+
+#divCacheRatio{
+    width: 420px;
+    margin-top: -20px;
+}
+
+#divCacheRatioContent{
+    height: 320px;
+}
+
+#divCacheRatioRect{
+	margin-left: 20px;
+    width:90%;
+    height:280px;
+}
+
+#divCacheActionRect{
+	/*margin-left: 20px;*/
+    width:99%;
+    height:280px;
+}
+
+#divCacheIOWorkload{
+    width: 500px;
+}
+
+#divCacheIOWorkloadContent{
+    height: 180px;
+}
+
+#divMain{
+    text-align: left;
+    width: 1024px;
+    height: auto;
+}

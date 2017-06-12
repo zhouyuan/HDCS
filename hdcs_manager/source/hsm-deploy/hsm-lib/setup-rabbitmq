@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+function setup_rabbitmq() {
+    set -o xtrace
+    echo -e "Begin to Setup RabbitMQ"
+
+    # unset proxy
+    unset_proxy
+
+    if [[ `os_check` == "centos" ]]; then
+        systemctl enable rabbitmq-server.service
+        systemctl restart rabbitmq-server.service
+    fi
+
+    if [[ `rabbitmqctl list_users|grep ${RABBITMQ_USER}|wc -l` -eq 0 ]]; then
+        rabbitmqctl add_user ${RABBITMQ_USER} ${RABBITMQ_PASSWORD}
+    fi
+    rabbitmqctl set_permissions ${RABBITMQ_USER} ".*" ".*" ".*"
+    echo -e "Finish to setup RabbitMQ"
+    sleep 2
+
+    set +o xtrace
+}

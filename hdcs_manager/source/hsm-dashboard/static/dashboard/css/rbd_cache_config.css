@@ -1,0 +1,37 @@
+#divPoolForm{
+	width:720px;
+	border:1px solid #ccc;
+	overflow: hidden;
+	padding: 5px;
+}
+
+#divFormOptions{
+	width:700px;
+	height: 50px;
+	line-height: 50px;
+	clear: both;
+}
+
+.control-group{
+	margin-top: 10px;
+}
+
+#framework
+{
+    text-align: left;
+    margin-left:5px;
+}
+
+#divRBDCacheConfig{
+    width: 730px;
+}
+
+#divRBDCacheConfigContent{
+    height: 480px;
+}
+
+#divMain{
+    text-align: left;
+    width: 1024px;
+    height: auto;
+}

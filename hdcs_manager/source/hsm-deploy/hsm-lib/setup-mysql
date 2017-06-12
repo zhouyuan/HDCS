@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+
+function setup_mysql() {
+    set -o xtrace
+    echo -e "Begin to Setup MySQL"
+
+    # unset proxy
+    unset_proxy
+
+    if [[ `os_check` == "centos" ]]; then
+        my_hsm_cnf=/etc/my.cnf.d/my-hsm.cnf
+    else
+        my_hsm_cnf=/etc/mysql/conf.d/my-hsm.cnf
+    fi
+    if [[ ! -f ${my_hsm_cnf} ]]; then
+        cat <<EOF > ${my_hsm_cnf}
+[mysqld]
+bind-address = %bind-address%
+default-storage-engine = innodb
+innodb_file_per_table
+max_connections = 4096
+collation-server = utf8_general_ci
+character-set-server = utf8
+EOF
+        sed -i "s,%bind-address%,${MYSQL_HOST},g" ${my_hsm_cnf}
+        if [[ `os_check` == "centos" ]]; then
+            systemctl enable mariadb.service
+            systemctl restart mariadb.service
+        else
+            service mysql restart
+        fi
+        sed -i "s,%MYSQL_ROOT_PASSWORD%,${MYSQL_ROOT_PASSWORD},g" ${TOPDIR}/hsm-lib/exp_mysql
+        chmod +x ${TOPDIR}/hsm-lib/exp_mysql
+        ${TOPDIR}/hsm-lib/exp_mysql
+    fi
+    echo -e "Finish to setup MySQL"
+    sleep 2
+
+    set +o xtrace
+}

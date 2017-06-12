@@ -1,0 +1,15 @@
+function __create_repo_by_rpms() {
+    sudo yum install -y createrepo
+    local old_dir=`pwd`
+    cd $TOPDIR/
+    mkdir -p /tmp/debs/
+    find . -name "*.rpm" | grep "hsm-" | xargs -i rm -rf {}
+    find /var -name "*.rpm" | grep hsm | xargs -i rm -rf {}
+    find . -name "*.rpm" | grep "hsmclient" | xargs -i rm -rf {}
+    mkdir -p $TOPDIR/hsmrepo
+    find ~/rpmbuild/RPMS -name "*.rpm" | grep hsm | xargs -i cp -rf {} $TOPDIR/hsmrepo/
+    rm -rf $TOPDIR/hsmrepo/repodata
+    cd $TOPDIR/hsmrepo
+    createrepo . 
+    cd $old_dir
+}
