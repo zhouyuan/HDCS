@@ -8,6 +8,10 @@ HDCS is not a product, and it does not have a full-time support team. Before you
 
 For other questions, contact jian.zhang@intel.com, yuan.zhou@intel.com or chendi.xue@intel.com
 
+## Licensing
+
+Intel source code is being released under the Apache 2.0 license.
+
 ## Introduction
 
 With the strong requirements of cloud computing and software defined architecture, more and more data centers are adopting distribute storage solutions, which usually centralized, based on commodity hardware, with large capacity and designed for scale-out solution. However, the performance of the distribute storage system suffers when running multiple VM on the compute node due to remote access of VM I/O in this architecture, especially for database workloads.  Meanwhile, the critical enterprise readiness features like deduplication, compression are usually missed.
