@@ -1,4 +1,5 @@
 #include "rbc/MetaStore.h"
+#include "rbc/common/FailoverHandler.h"
 
 using namespace rocksdb;
 
@@ -13,7 +14,8 @@ MetaStore::MetaStore( std::string kDBPath ):kDBPath(kDBPath){
   if (!s.ok())
   {
     log_print("MetaStore::MetaStore open %s failed\n", kDBPath.c_str());
-    assert(0);
+    failover_handler(METADATA_ROCKSDB_OPEN,NULL);
+    assert(0);///
   }
 }
 
@@ -29,6 +31,8 @@ int MetaStore::get(const char* oid, char* data){
     std::string value;
     Status s = db->Get(ReadOptions(), oid, &value);
     if (!s.ok()){
+        failover_handler(METADATA_ROCKSDB_GET,NULL);
+        assert(0);///
         return -1;
     }
     data = const_cast<char*>(value.c_str());
@@ -40,6 +44,8 @@ int MetaStore::put(std::string key, std::string val){
     return 0;
     Status s = db->Put(WriteOptions(), key, val);
     if (!s.ok()){
+        failover_handler(METADATA_ROCKSDB_PUT,NULL);
+        assert(0);///
         return -1;
     }
     return 0;
@@ -48,6 +54,8 @@ int MetaStore::put(std::string key, std::string val){
 int MetaStore::remove(std::string key){
     Status s = db->Delete(WriteOptions(), key);
     if (!s.ok()){
+        failover_handler(METADATA_ROCKSDB_DELETE,NULL);
+        assert(0);///
         return -1;
     }
     return 0;
@@ -64,8 +72,11 @@ int MetaStore::get_all( CacheMap *cache_map, LRU_LIST<char*> *lru_dirty, LRU_LIS
             lru_dirty->touch_key( (char*)cache_entry );
         else
             lru_clean->touch_key( (char*)cache_entry );
-
-        assert(it->status().ok()); // Check for any errors found during the scan
+	if(!(it->status().ok())){
+            failover_handler(METADATA_ROCKSDB_SCAN,NULL);
+            assert(it->status().ok());//// // Check for any errors found during the scan
+	     
+	}
     }
     delete it;
     return 0;
@@ -79,8 +90,10 @@ int MetaStore::get_all( BLOCK_INDEX *block_map, bool* cached_array, uint64_t obj
         value = stoull(it->value().ToString());
         block_map->insert( std::make_pair(stoull(it->key().ToString()), std::make_pair(value/object_size, ts)) );
         cached_array[value/object_size] = true;
-
-        assert(it->status().ok()); // Check for any errors found during the scan
+	if(!(it->status().ok())){
+            failover_handler(METADATA_ROCKSDB_SCAN,NULL);
+            assert(it->status().ok()); /////// Check for any errors found during the scan
+	}
     }
     delete it;
     return 0;

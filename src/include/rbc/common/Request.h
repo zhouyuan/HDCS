@@ -61,7 +61,7 @@ public:
         if(cond!=NULL)
             delete cond;
     }
-    
+
     int complete(){
         int ret = 1;
         if( source_type == REQ_LIBRARY ){
@@ -86,7 +86,7 @@ public:
         }
         return ret;
     }
-    
+
     void update_status( ssize_t data ){
         if( data < 0 )
             req_status = data;

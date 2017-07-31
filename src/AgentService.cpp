@@ -69,6 +69,7 @@ void AgentService::do_flush( CacheEntry* c_entry ){
     if(ret < 0){
         log_err( "AgentService::flush read_from_cache failed.Details: %s\n", (c_entry->get_name()).c_str() );
         cct->mempool->free( (void*)data_from_cache, sizeof(char) * cct->object_size);
+        assert(0);
         return;
     }
     //create a char* list by cachemap
@@ -83,6 +84,7 @@ void AgentService::do_flush( CacheEntry* c_entry ){
             onfinish->finish( ret );
             log_print("AgentService::flush write_to_backend failed. Details: %s:%lu:%lu\n", (c_entry->get_location_id()).c_str(), (c_entry->get_offset() + it->first), it->second);
             delete onfinish;
+            assert(0);
         }
     }
 }
