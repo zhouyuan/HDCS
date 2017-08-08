@@ -97,6 +97,12 @@ public:
         //log_print("finish read op %p, off=%lu, len=%lu\n", this, offset, length);
         return r;
     }
+
+    ssize_t backstore_write(){
+        ssize_t r = this->cct->backendstore->write( image_name, offset, length, data, "rbd" );
+        return r;
+    }
+
     int backstore_aio_write( C_AioBackendCompletion *onfinish ){
         this->cct->flush_op_count++;
         int r = this->cct->backendstore->aio_write( image_name, offset, length, data, "rbd", onfinish );

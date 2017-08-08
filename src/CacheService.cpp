@@ -239,6 +239,7 @@ int CacheService::write_hit( Op *op ){
         cct->lru_clean->remove((char*)op->cache_entry);
         op->cache_entry->set_cache_dirty();
 
+        op->backstore_write();
         ret = op->metastore_update();
         assert(ret == 0);
 
@@ -299,6 +300,7 @@ int CacheService::write_miss( Op *op ){
         cct->lru_clean->remove((char*)op->cache_entry);
         op->cache_entry->set_cache_dirty();
 
+        op->backstore_write();
         ret = op->metastore_update();
         assert(ret == 0);
 
