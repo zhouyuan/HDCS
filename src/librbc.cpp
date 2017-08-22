@@ -61,10 +61,14 @@ int librbc::rbc_read( const char* location, uint64_t offset, uint64_t length, ch
     csd->queue_io(req);
 
     cond->wait();
-    uint64_t len = req->msg->header.content_length;
-    memcpy(data, req->msg->content, len);
-    delete req;
-    return len;
+    if(req->msg->header.type==MSG_FAIL){
+	return req->msg->header.reserve;
+    }else if(req->msg->header.type==MSG_SUCCESS){
+        uint64_t len = req->msg->header.content_length;
+        memcpy(data, req->msg->content, len);
+        delete req;
+        return len;
+    }
 }
 
 int librbc::rbc_write( const char* location, uint64_t offset, uint64_t length, const char* data ){
@@ -75,15 +79,9 @@ int librbc::rbc_write( const char* location, uint64_t offset, uint64_t length, c
     csd->queue_io(req);
 
     cond->wait();
-    if(*req->msg->content == MSG_SUCCESS){
-        delete req;
-        return 0;
-    }
-    else if(*req->msg->content == MSG_FAIL){
-        delete req;
-        return -1;
-    }
-    return -1;
+    ssize_t ret=req->msg->header.reserve;
+    delete req;
+    return ret;
 }
 
 int librbc::rbc_aio_write_around( const char* location, uint64_t offset, uint64_t length, const char* data, rbc_completion_t c ){

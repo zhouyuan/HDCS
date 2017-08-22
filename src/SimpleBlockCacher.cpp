@@ -46,7 +46,7 @@ SimpleBlockCacher::SimpleBlockCacher(std::string device_name, std::string metast
     device_fd = _open( device_name );
 
     if (device_fd < 0) {
-        assert(0);
+        assert(0);// how to return?
     }
 }
 
@@ -98,8 +98,9 @@ int64_t SimpleBlockCacher::read_index_lookup( uint64_t cache_id ){
     cache_index_lock.lock();
     const typename BLOCK_INDEX::iterator it = cache_index.find( cache_id );
     if( it == cache_index.end() ){
+	FailoverHandler(SIMPLEBLOCK_READ_INDEX_LOOKUP,NULL);
         log_err("SimpleBlockCacher::read_index_lookup_can't find cache_id=%lu\n", cache_id);
-        off = -1;
+        off = SIMPLEBLOCK_READ_INDEX_LOOKUP;
     }else{
         off = it->second.first;
     }
@@ -285,8 +286,9 @@ int SimpleBlockCacher::_write( uint64_t cache_id, const char *buf, uint64_t offs
 ssize_t SimpleBlockCacher::_read( uint64_t cache_id, char *buf, uint64_t offset, uint64_t length ){
     uint64_t index = 0;
     int64_t block_id = read_index_lookup( cache_id );
-    if(block_id < 0)
-        return -1;
+    if(block_id < 0){
+        return block_id;
+    }
     uint64_t off_by_block = get_block_index( &index, offset );
     int ret;
 
@@ -298,7 +300,7 @@ ssize_t SimpleBlockCacher::_read( uint64_t cache_id, char *buf, uint64_t offset,
         return SIMPLEBLOCKCACHE_FS_READ;
     }
 
-    return length;
+    return ret;
 }
 
-}
+

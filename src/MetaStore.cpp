@@ -32,8 +32,8 @@ int MetaStore::get(const char* oid, char* data){
     Status s = db->Get(ReadOptions(), oid, &value);
     if (!s.ok()){
         failover_handler(METADATA_ROCKSDB_GET,NULL);
-        assert(0);///
-        return -1;
+	//assert(0);
+        return METADAT_ROCKSDB_GET;
     }
     data = const_cast<char*>(value.c_str());
     return 0;
@@ -45,8 +45,8 @@ int MetaStore::put(std::string key, std::string val){
     Status s = db->Put(WriteOptions(), key, val);
     if (!s.ok()){
         failover_handler(METADATA_ROCKSDB_PUT,NULL);
-        assert(0);///
-        return -1;
+       // assert(0);///
+        return METADATA_ROCKSDB_PUT;
     }
     return 0;
 }
@@ -55,8 +55,8 @@ int MetaStore::remove(std::string key){
     Status s = db->Delete(WriteOptions(), key);
     if (!s.ok()){
         failover_handler(METADATA_ROCKSDB_DELETE,NULL);
-        assert(0);///
-        return -1;
+        //assert(0);///
+        return METADATA_ROCKSDB_DELETE;
     }
     return 0;
 }
@@ -74,7 +74,8 @@ int MetaStore::get_all( CacheMap *cache_map, LRU_LIST<char*> *lru_dirty, LRU_LIS
             lru_clean->touch_key( (char*)cache_entry );
 	if(!(it->status().ok())){
             failover_handler(METADATA_ROCKSDB_SCAN,NULL);
-            assert(it->status().ok());//// // Check for any errors found during the scan
+           // assert(it->status().ok());//// // Check for any errors found during the scan
+            return METADATA_ROCKSDB_SCAN;
 	     
 	}
     }
@@ -92,7 +93,8 @@ int MetaStore::get_all( BLOCK_INDEX *block_map, bool* cached_array, uint64_t obj
         cached_array[value/object_size] = true;
 	if(!(it->status().ok())){
             failover_handler(METADATA_ROCKSDB_SCAN,NULL);
-            assert(it->status().ok()); /////// Check for any errors found during the scan
+            //assert(it->status().ok()); /////// Check for any errors found during the scan
+            return METADATA_ROCKSDB_SCAN;
 	}
     }
     delete it;

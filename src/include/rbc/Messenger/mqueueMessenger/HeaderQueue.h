@@ -104,7 +104,7 @@ public:
         if( ret == -1 ){
             fprintf( stdout, "MSG QUEUE %s SEND failed, error no: %s\n", mqueue_name, strerror(errno) );
             failover_handler(MQ_SEND,NULL);
-            return -1;
+            return MQ_SEND;
         }
         return 0;
     }
