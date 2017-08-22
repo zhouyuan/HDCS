@@ -1,0 +1,8 @@
+HDCS 1.1.0 (2017-08-06)
+----------------------
+1. Supporting master/slave replication
+2. fixing bug on single_patch
+
+HDCS 1.0.0 (2017-07-05)
+-----------------------
+1. rebase version to 1.0.0 for open source
