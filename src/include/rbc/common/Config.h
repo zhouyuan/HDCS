@@ -30,6 +30,7 @@ public:
         {"slave_messenger_port",  "9091"},
         {"enable_MemoryUsageTracker","false"},
         {"cache_dir","/mnt/hyperstash_0/"},
+        {"datastore_type","simple"},
         {"object_size","4096"},
         {"cache_total_size","10737418240"},
         {"cache_dirty_ratio_min","0.85"},
