@@ -18,7 +18,11 @@ public:
     }
 
     void complete(ssize_t r){
-        //printf("C_AioClientCompletion\n");
+	if(r<0){
+	   log_printf("async IO operation fails. Error code is %d \n", r);
+	}
+	// async operation error code 'r' will be passed into callback function 
+	// which is writen by User. 
         if (complete_cb) {
             complete_cb(r, complete_arg);
         }

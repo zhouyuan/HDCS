@@ -1,7 +1,6 @@
-#ifndef C_AIOBACKENDCOMPLETIONIMP_H
-#define C_AIOBACKENDCOMPLETIONIMP_H
-
+#ifndef C_AIOBACKENDCOMPLETIONIMP_H #define C_AIOBACKENDCOMPLETIONIMP_H 
 #include "rbc/C_AioBackendCompletion.h"
+#include "FailoverHandler.h"
 
 namespace rbc{
 struct C_AioBackendWrite : C_AioBackendCompletion{
@@ -17,6 +16,7 @@ struct C_AioBackendWrite : C_AioBackendCompletion{
             log_err("C_AioBackendCompletion finish failed, ret=%ld\n", r);
             op->cache_entry->inflight_flush = false;
             delete op;
+	    failover_handler(BACKEND_RADOS_AIO_WRITE);
             return;
         }
 
@@ -57,6 +57,7 @@ struct C_AioBackendRead : C_AioBackendCompletion{
         if( r < 0 ){
             //TODO: read failed
             op->commit(r);
+	    failover_handler(BACKEND_RADOS_AIO_READ);
             return;
         }
         assert( r == op->length );

@@ -4,7 +4,7 @@
 #include <map>
 #include <string>
 #include <vector>
-
+#include "FailoverHandler.h"
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 
@@ -27,7 +27,6 @@ public:
         {"master_ip",  "127.0.0.1"},
         {"slave_ip",  "192.168.5.11"},
         {"messenger_port",  "9090"},
-        {"slave_messenger_port",  "9091"},
         {"enable_MemoryUsageTracker","false"},
         {"cache_dir","/mnt/hyperstash_0/"},
         {"object_size","4096"},
@@ -52,6 +51,7 @@ public:
             std::cout << "error when reading: " << cfg_file
                       << ", config file for missing?" << std::endl;
             // assume general.conf should be created by admin manually
+            failover_handler(HDCS_CONFIG_FILE, NULL);
             assert(0);
         }
 

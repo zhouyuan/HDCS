@@ -81,7 +81,7 @@ public:
         key = key%999 + 5000; 
         if ((shmid = shmget(key, SHM_SIZE, IPC_CREAT | 0666)) < 0) {
             printf("unable to do shmget by create, key: %u \n", key);
-            assert(0);
+            failover_handler(SH_GET,NULL);
         }
     
         uint64_t trunk_count = SHM_SIZE/(SHM_TRUNK_SIZE);
@@ -99,16 +99,21 @@ public:
         trunk_list_mutex.unlock();
         if ((shared_memory_ptr = (char*)shmat(shmid, NULL, 0)) == (char *) -1) {
             perror("unable to do shmat");
+	    failover_handler(SH_AT,NULL);
             assert(0);
         }
     }
 
     ~ContentSegment(){
         /* Detach the shared memory segment.  */
-        shmdt(shared_memory_ptr);
+        if(0!=shmdt(shared_memory_ptr)){
+	     failover_handler(SHM_DT,NULL);
+	}
         if( init ){
             /* Deallocate the shared memory segment.  */
-            shmctl(shmid, IPC_RMID, 0);
+            if(0!=shmctl(shmid, IPC_RMID, 0)){
+		failover_handler(SHM_CTL,NULL);
+	    }
         }
     }
     
