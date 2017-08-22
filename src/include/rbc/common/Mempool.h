@@ -4,6 +4,7 @@
 #include <mutex>
 
 #include "MemoryUsageTracker.h"
+#include "FailoverHandler.h"
 
 namespace rbc{
 class Mempool{
@@ -22,8 +23,11 @@ public:
 
     void* malloc( ssize_t len ){
         if(mem_tracker)
-            mem_tracker->add( "Mempool", len);
+            mem_tracker->add( "Mempool", len);// if malloc fails?
         void* p = std::malloc( len );
+	if(NULL==p){
+		failover_handler(MEMORY_MALLOC,NULL);
+	}
         memset(p, 0, len);
         return p;
     }
