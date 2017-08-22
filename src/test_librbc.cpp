@@ -10,6 +10,9 @@ struct cb_param{
 
 cb_param arg;
 static void _finish_aiocb(int r, void *data){
+    if( r< 0 ){
+	printf("io operation fail\n");
+    }
     cb_param* tmp = (cb_param*) data;
     tmp->inflight_ops--;
     tmp->io_complete_count++;

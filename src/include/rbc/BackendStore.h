@@ -53,7 +53,7 @@ private:
     int _open( std::string rbd_name, std::string pool_name );
     int _close( std::string rbd_name );
     int _close(rbd_data* rbd );
-    rbd_data* find_rbd_data( std::string rbd_name, std::string pool_name );
+    rbd_data* find_rbd_data( std::string rbd_name, std::string pool_name,int &error_code );
     int _write( rbd_data* rbd, uint64_t offset, uint64_t length, const char* data );
     ssize_t _read( rbd_data* rbd, uint64_t offset, uint64_t length, char* data );
     int _aio_write( rbd_data* rbd, uint64_t offset, uint64_t length, const char* data, C_AioBackendCompletion *onfinish );

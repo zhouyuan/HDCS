@@ -65,6 +65,12 @@ public:
     int complete(){
         int ret = 1;
         if( source_type == REQ_LIBRARY ){
+	    if(req_status<0){
+	        msg->set_type(MSG_FAIL);
+	     }else{
+	        msg->set_type(MSG_SUCCESS);	
+	     }
+	    msg->set_reserve(req_status);
             cond->Signal();
         }else if( source_type == REQ_LIBRARY_AIO ){
             comp->complete(req_status);
