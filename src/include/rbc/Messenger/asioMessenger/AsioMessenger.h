@@ -5,7 +5,6 @@
 #include <boost/asio.hpp>
 #include <mutex>
 #include <condition_variable>
-#include "../common/FailoverHandler.h"
 
 namespace rbc{
 using boost::asio::ip::tcp;
@@ -50,7 +49,6 @@ public:
         try{
             socket_->close();
         }catch(std::exception& e){
-            failover_handler(ASIO_SOCKET_CLOSE, NULL);
             std::cout << "Exception: " << e.what() << "\n";
         }
         connected = false;
@@ -67,7 +65,7 @@ public:
     }
 
     void start_receive(){
-        async_read(    
+        async_read(
             *socket_,
             boost::asio::buffer( msg_header, MSG_HEADER_LEN ),
             boost::bind(
@@ -83,17 +81,12 @@ public:
         ssize_t exact_bytes_received = 0;
         ssize_t left = bytes_to_recv;
         ssize_t offset = 0;
-        try{
-            while( left ){
-                exact_bytes_received = socket_->read_some(
-                    boost::asio::buffer( &data[offset], left )
-                );
-                left -= exact_bytes_received;
-                offset += exact_bytes_received;
-            }
-        }catch(std::exception& e){
-            std::cout << e.what()<<std::endl;
-            failover_handler(ASIO_SOCKET_ASYNC_READ_SOME,NULL);
+        while( left ){
+            exact_bytes_received = socket_->read_some(
+                boost::asio::buffer( &data[offset], left )
+            );
+            left -= exact_bytes_received;
+            offset += exact_bytes_received;
         }
     }
 
@@ -118,10 +111,9 @@ public:
             if( error == boost::asio::error::eof ){
                 log_print("AsioMessenger::handle_receive Socket closed by peer\n");
             }else{
-                failover_handler(ASIO_FUNCTION_ASYNC_READ,NULL);
                 log_print("AsioMessenger::handle_receive failed, error:%s \n", error.message().c_str());
             }
-            stop();
+            stop(); 
             return;
         }
         start_receive();
@@ -139,7 +131,7 @@ public:
         }
         return ret;
     }
-
+    
     int start_send( const char* data_, ssize_t length ){
         ssize_t offset = 0;
         ssize_t exact_send_bytes = 0;
@@ -147,12 +139,11 @@ public:
 
         while( left ){
             try{
-                exact_send_bytes = socket_->send(////
+                exact_send_bytes = socket_->send(
                     boost::asio::buffer( &data_[offset], left )
                 );
             }catch (std::exception& e){
                 std::cout << "ASIO Messenger sending MSG failed, Exception: " << e.what() << "\n";
-		failover_handler(ASIO_SOCKET_SEND,NULL);
                 return -1;
             }
             left -= exact_send_bytes;
@@ -169,7 +160,7 @@ public:
         handle_cb = cb;
         handle_arg = arg;
     }
-
+    
 };
 
 }

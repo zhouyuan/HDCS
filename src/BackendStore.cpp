@@ -1,5 +1,4 @@
 #include "rbc/BackendStore.h"
-#include "rbc/common/FailoverHanlder.h"
 
 static void rbc_backend_finish_aiocb( rbd_completion_t comp, void *data ){
     //rbc::log_print("rbc_backend_finish_aiocb\n");
@@ -17,21 +16,18 @@ BackendStore::BackendStore( const char* client_name ){
 
     r = rados_create(&cluster, client_name);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_CREATE,NULL);
         log_err("rados_create failed.\n");
         goto failed_early;
     }
 
     r = rados_conf_read_file(cluster, NULL);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_READ_CONF_FILE,NULL);
         log_err("rados_conf_read_file failed.\n");
         goto failed_early;
     }
 
     r = rados_connect(cluster);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_CONNECT,NULL);
         log_err("rados_connect failed.\n");
         goto failed_shutdown;
     }
@@ -63,7 +59,6 @@ int BackendStore::_open( std::string rbd_name, std::string pool_name ){
     //printf("connect to rados\n");
     int r = rados_ioctx_create(cluster, pool_name.c_str(), &rbd->io_ctx);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_IOCTX_CREATE,NULL);
         log_err("rados_ioctx_create failed.\n");
         goto failed_shutdown;
     }
@@ -73,7 +68,6 @@ int BackendStore::_open( std::string rbd_name, std::string pool_name ){
     r = rbd_open_skip_cache(rbd->io_ctx, rbd_name.c_str(), &rbd->image, NULL /*snap */ );
     //r = rbd_open(rbd->io_ctx, rbd_name.c_str(), &rbd->image, NULL /*snap */ );
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_OPEN_SKIP_CACHE, NULL);
         log_err("rbd_open failed.\n");
         goto failed_open;
     }
@@ -172,14 +166,9 @@ int BackendStore::_aio_write( rbd_data* rbd, uint64_t offset, uint64_t length, c
        C_AioBackendCompletion* onfinish ){
     rbd_aio_unit *io_u = new rbd_aio_unit( onfinish );
     int r = rbd_aio_create_completion(io_u, rbc_backend_finish_aiocb, &io_u->completion);
-    if(r<0){
-	failover_handler(BACKEND_RADOS_AIO_CREATE_COMPLETE,NULL);
-	return -1;
-    }
     //std::cerr << "rbd_aio_write: comp: " << io_u->completion << " offset: " << offset << " length: " << length<< std::endl;
     r = rbd_aio_write(rbd->image, offset, length, data, io_u->completion);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_AIO_WEITE,NULL);
         log_err("queue rbd_aio_write failed.\n");
         return -1;
     }
@@ -190,8 +179,6 @@ int BackendStore::_write( rbd_data* rbd, uint64_t offset, uint64_t length, const
     //log_print("rbd_write: offset:%lu, length: %lu\n", offset, length);
     int r = rbd_write(rbd->image, offset, length, data);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_WRITE,NULL);
-	assert(0);
         log_err("rbd_write failed.\n");
         return -1;
     }
@@ -204,15 +191,12 @@ ssize_t BackendStore::_aio_read( rbd_data* rbd, uint64_t offset, uint64_t length
     rbd_aio_unit *io_u = new rbd_aio_unit( onfinish );
     ssize_t r = rbd_aio_create_completion(io_u, rbc_backend_finish_aiocb, &io_u->completion);
     if(r < 0){
-	failover_handler(BACKEND_RADOS_AIO_CREATE_COMPLETE,NULL);
         log_err("rbd_read failed create completion.\n");
         return -1;
     }
     //std::cerr << "rbd_aio_read: comp: " << io_u->completion << " offset: " << offset << " length: " << length<< std::endl;
     r = rbd_aio_read(rbd->image, offset, length, data, io_u->completion);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_AIO_READ,NULL);
-	assert(0);
         log_err("rbd_aio_read failed.\n");
         return -1;
     }
@@ -223,8 +207,6 @@ ssize_t BackendStore::_read( rbd_data* rbd, uint64_t offset, uint64_t length, ch
     //log_print("rbd_read: offset:%lu, length: %lu\n", offset, length);
     ssize_t r = rbd_read(rbd->image, offset, length, data);
     if (r < 0) {
-	failover_handler(BACKEND_RADOS_READ,NULL);
-	assert(0);
         log_err("rbd_read failed.\n");
         return -1;
     }
