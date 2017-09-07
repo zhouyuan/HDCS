@@ -8,7 +8,6 @@
 #include "rbc/common/ThreadPool.h"
 #include "rbc/Messenger/mqueueMessenger/MqueueSession.h"
 #include "rbc/Messenger/asioMessenger/AsioSession.h"
-#include "rbc/common/FailoverHandler.h"
 
 namespace rbc{
 using boost::asio::ip::tcp;
@@ -74,7 +73,6 @@ public:
 
             start_accept();
         }else{
-	    failover_handler(ASIO_SOCKET_CONNECTION,NULL);
             log_print("AsioListener::handle_accept failed to accept new connection\n");;
         }
     }

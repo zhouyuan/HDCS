@@ -34,14 +34,14 @@ int CacheService::queue_io( Request* req ){
 
 int CacheService::do_flush_op(Op* op) {
     //TODO:
-    int ret=agentservice->flush_all();
-    return ret;
+    agentservice->flush_all();
+    return 0;
 }
 
 int CacheService::do_discard_op(Op* op) {
     //TODO:
-    int ret=agentservice->do_evict(op->cache_entry);
-    return ret;
+    agentservice->do_evict(op->cache_entry);
+    return 0;
 }
 
 void CacheService::_process(){
@@ -161,7 +161,7 @@ int CacheService::do_read_op(Op *op){
     }else{
         ret = read_miss( op );
     }
-    return ret
+    return ret;
 }
 
 int CacheService::do_write_op( Op *op ){
@@ -181,10 +181,7 @@ int CacheService::do_write_op( Op *op ){
         Op* replica_op = new Op(cct, op->image_name, op->offset,
                             op->data, op->length, cct->mempool, op->req );
         C_AioReplicationCompletion *onfinish = new C_AioReplicationCompletion(replica_op);
-        ret=replica_op->replica_aio_write((AioCompletion*)onfinish);
-	if(ret<0){
-           return ret;
-	}
+        replica_op->replica_aio_write((AioCompletion*)onfinish);
     }
 
     std::string oid_string = get_index( op->image_name, op->offset );
@@ -243,10 +240,8 @@ int CacheService::write_hit( Op *op ){
         op->cache_entry->set_cache_dirty();
 
         ret = op->metastore_update();
-        //assert(ret == 0);
-        if(ret<0){
-	    return ret;
-	}
+        assert(ret == 0);
+
     }
     op->commit(ret);
     delete op;

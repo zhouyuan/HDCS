@@ -38,20 +38,20 @@ AgentService::~AgentService(){
     log_print("delete agentservice complete\n");
 }
 
-int AgentService::do_flush( CacheEntry* c_entry ){
+void AgentService::do_flush( CacheEntry* c_entry ){
 
     ReadLock cache_entry_r_lock(c_entry->rwlock);
     if( c_entry == NULL || c_entry->is_null() ){
-        return 0;
+        return;
     }
 
     if(!c_entry->get_if_dirty()){
-        return 0;
+        return;
     }
 
     if(c_entry->inflight_flush){
         //the c_entry is still pending for flush completion.
-        return 0;
+        return;
     }
 
     /*
@@ -69,8 +69,7 @@ int AgentService::do_flush( CacheEntry* c_entry ){
     if(ret < 0){
         log_err( "AgentService::flush read_from_cache failed.Details: %s\n", (c_entry->get_name()).c_str() );
         cct->mempool->free( (void*)data_from_cache, sizeof(char) * cct->object_size);
-        //assert(0);
-        return ret;
+        return;
     }
     //create a char* list by cachemap
     DATAMAP_T data_map = c_entry->get_data_map();
@@ -80,20 +79,16 @@ int AgentService::do_flush( CacheEntry* c_entry ){
         new_op->cache_entry = c_entry;
         C_AioBackendCompletion *onfinish = new C_AioBackendWrite( new_op );
         ret = new_op->backstore_aio_write( onfinish );
-        if(ret < 0){// when initiating async wirting operation, fail happen.
+        if(ret < 0){
             onfinish->finish( ret );
             log_print("AgentService::flush write_to_backend failed. Details: %s:%lu:%lu\n", (c_entry->get_location_id()).c_str(), (c_entry->get_offset() + it->first), it->second);
             delete onfinish;
-            //assert(0);
-            return ret;
         }
     }
-    return ret;
 }
 
-int AgentService::flush( CacheEntry** c_entry_list ){
+void AgentService::flush( CacheEntry** c_entry_list ){
     //sort c_entry by offset
-    int ret=0;
     std::map<uint64_t, CacheEntry*> tmp_sort;
     for(uint64_t i = 0; c_entry_list[i]; i++){
         if ( !c_entry_list[i]->is_null() ) {
@@ -125,46 +120,39 @@ int AgentService::flush( CacheEntry** c_entry_list ){
         }
 
         CacheEntry* c_entry = c_entry_list_sort[i];
-	do_flush( c_entry );
+
+        do_flush( c_entry );
+
         completed_flush++;
     }
     tmp_sort.clear();
     cct->mempool->free( (void*)c_entry_list_sort, sizeof(CacheEntry*) * (tmp_sort_size+1) );
     log_print("AgentService::flush complete\n");
-    return ret;
+    return;
 }
 
-int AgentService::flush_all(){
+void AgentService::flush_all(){
     //should scan on all caches
     return flush_by_ratio(0);
 }
 
-int AgentService::do_evict( CacheEntry* c_entry ){
+void AgentService::do_evict( CacheEntry* c_entry ){
     WriteLock cache_entry_w_lock(c_entry->rwlock);
     if( c_entry == NULL || c_entry->is_null() ){
-        return 0;
+        return;
     }
     if( c_entry->get_if_dirty() ){
-        return 0;
+        return;
     }
     uint64_t cache_id = c_entry->get_offset() / cct->object_size;
-    int temp=cct->metastore->remove( c_entry->get_name() );
-    if(temp<0){
-         log_print("AgentService::do_evict fails, error code is : %d\n", temp);
-	 return -1;
-    }
+    cct->metastore->remove( c_entry->get_name() );
     //TODO: fix when racing with write/read
     c_entry->reset();
-    temp=cct->cacher->_remove( cache_id );
-    if(temp<0){
-        log_print("AgentService::do_evict fails, error code is : %d\n", temp);
-	return -1;
-    }
+    cct->cacher->_remove( cache_id );
     cct->lru_clean->remove( (char*)c_entry );
-    return 0; 
 }
 
-int AgentService::evict( CacheEntry** c_entry_list ){
+void AgentService::evict( CacheEntry** c_entry_list ){
     log_print("AgentService::evict start\n");
     uint64_t i = 0;
     for(;c_entry_list[i]!=0; i++){
@@ -173,13 +161,11 @@ int AgentService::evict( CacheEntry** c_entry_list ){
     }
     log_print("AgentService::evict waiting for %lu c_entry finish doing evict\n", i);
     threadpool->wait();
-    
     log_print("AgentService::evict complete\n");
-    return 0;
+    return;
 }
 
-int AgentService::flush_by_ratio( float target_ratio = 1.0 ){
-    int ret=0;
+void AgentService::flush_by_ratio( float target_ratio = 1.0 ){
     if(target_ratio == 1.0) {
         target_ratio = cache_dirty_ratio_min;
     }
@@ -190,20 +176,19 @@ int AgentService::flush_by_ratio( float target_ratio = 1.0 ){
     log_print( "AgentService::flush_by_ratio: dirty_ratio:%2.4f \n", ( 1.0*dirty_block_count/total_block_count ) );
 
     if( ( 1.0 * dirty_block_count/total_block_count ) < target_ratio ){
-        return 0;
+        return;
     } else {
         uint64_t need_to_flush_count = dirty_block_count - total_block_count * target_ratio;
         char** c_entry_list = (char**)cct->mempool->malloc( sizeof(char*) * (need_to_flush_count+1) );
         cct->lru_dirty->get_keys( &c_entry_list[0], need_to_flush_count, false );
-        int ret=flush( (CacheEntry**)c_entry_list );
+        flush( (CacheEntry**)c_entry_list );
 
         cct->mempool->free( (void*)c_entry_list, sizeof(char*) * (need_to_flush_count+1) );
     }
-    return ret;
+    return;
 }
-// public interface
-int AgentService::evict_by_ratio(){
-    int ret;
+
+void AgentService::evict_by_ratio(){
     uint64_t dirty_block_count = cct->lru_dirty->get_length();
     uint64_t clean_block_count = cct->lru_clean->get_length();
     uint64_t total_cached_block = dirty_block_count + clean_block_count;
@@ -212,7 +197,7 @@ int AgentService::evict_by_ratio(){
     log_print( "AgentService::evict_by_ratio:  current cache ratio:%2.4f \n", ( 1.0*total_cached_block/total_block_count ) );
     if( (1.0 * total_cached_block/total_block_count) < cache_ratio_max ){
         log_print("AgentService::evict_by_ratio: cache ratio is less than cache_ratio_max, no need do evict this time.\n");
-        return 0;
+        return;
     }
 
     WriteLock w_lock(cct->cachemap_access);
@@ -220,10 +205,7 @@ int AgentService::evict_by_ratio(){
     uint64_t need_to_evict_count = total_cached_block - cache_ratio_health * total_block_count;
     if (need_to_evict_count > clean_block_count) {
 
-        ret=flush_by_ratio(cache_ratio_health);
-	if(ret<0){
-	   log_print("AgentService::evict_by_ratio: flush_by_ratio operation have failure . \n");
-	}
+        flush_by_ratio(cache_ratio_health);
 
     }
 
@@ -231,12 +213,8 @@ int AgentService::evict_by_ratio(){
     char** c_entry_list = (char**)cct->mempool->malloc( sizeof(char*) * (need_to_evict_count+1) );
     log_print("lru_clean length %ld\n", cct->lru_clean->get_length());
     cct->lru_clean->get_keys( &c_entry_list[0], need_to_evict_count, false );
-    ret=evict( (CacheEntry**)c_entry_list );
-    if(ret<0){
-        log_print("AgentService::evict_by_ratio: flish_by_ratio operation have failure operation. \n");
-    }
+    evict( (CacheEntry**)c_entry_list );
     cct->mempool->free( (void*)c_entry_list, sizeof(char*) * (need_to_evict_count+1) );
-    return ret;
 
 }
 
@@ -255,7 +233,7 @@ void AgentService::_process_flush(){
 void AgentService::_process_evict(){
     while(cct->go){
         sleep( cache_evict_interval );
-        if(cct->go){
+            if(cct->go){
             evict_by_ratio();
             std::this_thread::yield();
         }
@@ -263,6 +241,3 @@ void AgentService::_process_evict(){
     log_print("AgentService::_process_evict complete\n");
 }
 }
-
-
-

@@ -3,7 +3,6 @@
 
 #include "rbc/common/AioCompletion.h"
 #include "rbc/common/Op.h"
-#include "rbc/common/FailoverHandler.h"
 
 namespace rbc{
 class C_AioReplicationCompletion : public AioCompletion{
@@ -21,7 +20,6 @@ public:
     void complete(ssize_t r){
         //printf("C_AioReplicationCompletion\n");
         if( r < 0 ){
-	    failover_handler(REPLICATE_FAILURE,NULL );
             log_err("C_AioReplicationCompletion finish failed, ret=%ld\n", r);
             delete op;
             assert(0);
