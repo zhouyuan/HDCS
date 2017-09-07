@@ -93,9 +93,7 @@ public:
             }
         }catch(std::exception& e){
             std::cout << e.what()<<std::endl;
-            log_print("AsioMessenger::receive_data fails \n");
             failover_handler(ASIO_SOCKET_ASYNC_READ_SOME,NULL);
-	    assert(0);
         }
     }
 
@@ -155,12 +153,12 @@ public:
             }catch (std::exception& e){
                 std::cout << "ASIO Messenger sending MSG failed, Exception: " << e.what() << "\n";
 		failover_handler(ASIO_SOCKET_SEND,NULL);
-                return ASIO_SOCKET_SEND;
+                return -1;
             }
             left -= exact_send_bytes;
             offset += exact_send_bytes;
         }
-        return offset;
+        return 0;
     }
 
     int start_send(std::string data){

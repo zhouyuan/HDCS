@@ -60,9 +60,6 @@ public:
         //log_print("start read op %p, off=%lu, len=%lu\n", this, offset, length);
         ssize_t ret = this->cct->cacher->_read( block_id, data, start_off, length );
         //log_print("finish read op %p, off=%lu, len=%lu\n", this, offset, length);
-        if(ret<0){
-	    log_printf("CacheService::datastore unable to read from cache\n");
-	}
         return ret;
     }
     ssize_t datastore_aio_read(){
@@ -85,8 +82,7 @@ public:
     }
     int replica_aio_write( AioCompletion *comp ){
         Msg* msg = new Msg( image_name.c_str(), offset, data, length, MSG_WRITE );
-        int ret=cct->client_for_slave->send_request(msg, (void*)comp);
-	return ret;
+        cct->client_for_slave->send_request(msg, (void*)comp);
     }
     ssize_t backstore_aio_read( C_AioBackendCompletion *onfinish ){
         while( cct->backend_aio_read_count > 256 ){
@@ -104,7 +100,7 @@ public:
     int backstore_aio_write( C_AioBackendCompletion *onfinish ){
         this->cct->flush_op_count++;
         int r = this->cct->backendstore->aio_write( image_name, offset, length, data, "rbd", onfinish );
-        return r;// just express that async writing operation have been launched.
+        return r;
     }
     int metastore_update(){
         int ret = 0;
