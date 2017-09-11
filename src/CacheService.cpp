@@ -1,4 +1,5 @@
 #include "rbc/CacheService.h"
+#include "rbc/common/Config.h"
 
 namespace rbc {
 
@@ -178,10 +179,14 @@ int CacheService::do_write_op( Op *op ){
     }
     //for replica write
     if(cct->if_master){
-        Op* replica_op = new Op(cct, op->image_name, op->offset,
+        int replica_num = std::stoi(cct->config->configValues["replication_num"]);
+        for( int i=0; i<replica_num-1; i++){
+            Op* replica_op = new Op(cct, op->image_name, op->offset,
                             op->data, op->length, cct->mempool, op->req );
-        C_AioReplicationCompletion *onfinish = new C_AioReplicationCompletion(replica_op);
-        replica_op->replica_aio_write((AioCompletion*)onfinish);
+            C_AioReplicationCompletion *onfinish = new C_AioReplicationCompletion(replica_op);
+            replica_op->replica_aio_write((AioCompletion*)onfinish, i);
+
+        }
     }
 
     std::string oid_string = get_index( op->image_name, op->offset );

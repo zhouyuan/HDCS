@@ -58,7 +58,7 @@ public:
     std::condition_variable flush_qd_cond, flush_stop_cond;
 
     AsioListener *server;
-    AsioClient *client_for_slave;
+    std::vector<AsioClient*> asio_client_vec;
     bool process_mode;
     bool if_master;
     std::string log_path;
@@ -67,7 +67,7 @@ public:
     Context(const char* rbd_name, bool process_mode = false, bool if_master = false):
         if_master(if_master),process_mode(process_mode) {
         go =  true;
-        config = new Config(rbd_name);
+        config = new Config(rbd_name, if_master);
         bool enable_mem_tracker = config->configValues["enable_MemoryUsageTracker"] == "true"?true:false;
         mempool = new Mempool( enable_mem_tracker );
         log_path = config->configValues["log_to_file"];
@@ -100,9 +100,15 @@ public:
             short port = stoi(config->configValues["messenger_port"]);
             server = new AsioListener( port, &request_queue );
             if( if_master ){
-                std::string target_ip = config->configValues["slave_ip"];;
-                std::string target_port = config->configValues["slave_messenger_port"];
-                client_for_slave = new AsioClient( target_ip, target_port ); 
+                //  according to replication amounts, generating AsioClient objects. 
+                //  one AsioClient represent one communication between master and slave.
+                int replica_num=std::stoi(config->configValues["replication_num"]);
+                auto ip_vec=config->slave_ip_vec;
+                auto port_vec=config->slave_port_vec;
+                for( int i=0; i< replica_num-1 ; i++){
+                    AsioClient* client_for_slave=new AsioClient( ip_vec[i], port_vec[i] );
+                    asio_client_vec.push_back(client_for_slave);
+                }
             }
         }
         //TODO(yuan): disable admin socket for temporarily until we fix
@@ -116,7 +122,11 @@ public:
         log_print("going to delete messenger\n");
         if(process_mode){
             delete server;
-            if(if_master) delete client_for_slave;
+            if(if_master){
+                for(int i=0; i<asio_client_vec.size(); i++){
+                    delete asio_client_vec[i];
+                }
+            }
         }
         //TODO: should call cache_entry destruction
         //delete admin_socket;
