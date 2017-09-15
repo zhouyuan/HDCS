@@ -25,15 +25,16 @@ namespace store {
                        AioCompletion* on_finish){}
     int block_discard(uint64_t block_id);
     int block_meta_update(uint64_t block_id, BLOCK_STATUS_TYPE status);
+    BLOCK_STATUS_TYPE get_block_meta(uint64_t block_id);
 
   private:
     int open_and_init(const char* path, uint64_t size);
-    int load_mmap(void* mmappedData, uint64_t size, int fd);
+    int load_mmap(void** mmappedData, uint64_t size, int fd);
     int close_fd(int fd);
 
     int data_store_fd;
     int meta_store_fd;
-    char* meta_store_mmap;
+    BLOCK_STATUS_TYPE* meta_store_mmap;
     uint64_t block_size;
     uint64_t store_size;
   };

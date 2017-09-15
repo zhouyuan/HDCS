@@ -35,7 +35,7 @@ SimpleBlockStore::SimpleBlockStore(std::string store_path,
     assert(0);
   }
   meta_store_fd = ret;
-  ret = load_mmap((void*)meta_store_mmap, block_count*META_BLOCK_SIZE, meta_store_fd);
+  ret = load_mmap((void**)&meta_store_mmap, block_count*META_BLOCK_SIZE, meta_store_fd);
   if (ret < 0) {
     log_print("Metastore mmap failed with err: %s", std::strerror(ret));
     assert(0);
@@ -73,9 +73,9 @@ int SimpleBlockStore::close_fd(int fd) {
   return ::close(fd);
 }
 
-int SimpleBlockStore::load_mmap(void* mmappedData, uint64_t size, int fd) {
-  mmappedData = ::mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd, 0);
-  if (mmappedData != MAP_FAILED) {
+int SimpleBlockStore::load_mmap(void** mmappedData, uint64_t size, int fd) {
+  *mmappedData = ::mmap(NULL, size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_POPULATE, fd, 0);
+  if (*mmappedData != MAP_FAILED) {
     return 0;
   } else {
     return -1;
@@ -109,7 +109,12 @@ int SimpleBlockStore::block_discard(uint64_t block_id) {
 }
 
 int SimpleBlockStore::block_meta_update(uint64_t block_id, BLOCK_STATUS_TYPE status) {
-  meta_store_mmap[block_id*META_BLOCK_SIZE] = status;
+  meta_store_mmap[block_id] = status;
+  return 0;
+}
+
+BLOCK_STATUS_TYPE SimpleBlockStore::get_block_meta(uint64_t block_id) {
+  return meta_store_mmap[block_id];
 }
 }// store
 }// hdcs

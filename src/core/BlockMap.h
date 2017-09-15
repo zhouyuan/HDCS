@@ -7,7 +7,7 @@
 #include <stdio.h>
 #include <stdint.h>
 #include <list>
-#include <map>
+#include <unordered_map>
 #include <mutex>
 #include <atomic>
 
@@ -16,7 +16,7 @@ namespace hdcs {
 namespace core {
 
 #define LOCATE_IN_CACHE 0x01
-#define NOT_IN_CACHE    0x02
+#define NOT_IN_CACHE    0x00
 
 typedef std::atomic<uint8_t> BlockStatus;
 struct Entry;
@@ -36,7 +36,8 @@ struct Block {
   BlockOp* block_ops_end;
 };
 
-typedef std::map<uint64_t, Block*> BlockMap;
+//typedef std::unordered_map<uint64_t, Block*> BlockMap;
+typedef Block* BlockMap;
 }// core
 
 }// hdcs

@@ -31,7 +31,8 @@ HDCSCore::HDCSCore() {
   std::string volume_name = config->configValues["rbd_volume_name"];
 
   block_guard = new BlockGuard(total_size, block_size);
-  policy = new CachePolicy(total_size, cache_size, block_size,
+  BlockMap* block_ptr_map = block_guard->get_block_map();
+  policy = new CachePolicy(total_size, cache_size, block_size, block_ptr_map,
                       new store::SimpleBlockStore(path, cache_size, block_size),
                       new store::RBDImageStore(pool_name, volume_name, block_size));
 
@@ -83,7 +84,7 @@ void HDCSCore::map_block(BlockRequest &&block_request) {
     block->in_process = true;
     block->block_ops_end = block_ops_end;
     do_process = true;
-    log_print("Block in process, append request, block: %lu, new end: %p", block->block_id, block_ops_end);
+    log_print("Block not in process, block: %lu, new end: %p", block->block_id, block_ops_end);
   } else {
     log_print("Block in process, append request, block: %lu, append BlockOp: %p after BlockOp: %p, new end: %p", block->block_id, block_ops_head, block->block_ops_end, block_ops_end);
     block->block_ops_end->block_op_next = block_ops_head;

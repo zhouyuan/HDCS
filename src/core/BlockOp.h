@@ -12,6 +12,8 @@ namespace hdcs {
 
 namespace core {
 
+#define MAX_BLOCK_ID 1073741824 
+
 class BlockOp {
 public:
   BlockOp(Block* block, BlockRequest* block_request, BlockOp* block_op) :
@@ -44,7 +46,6 @@ public:
                        BlockOp(block, &block_request_inst, block_op) {
   }
   void send() {
-    log_print("BlockRequestComplete block: %lu", block->block_id);
     complete(0);
   }
   void complete(int r) {
@@ -79,7 +80,8 @@ public:
                    block_buffer(block_buffer) {
   }
   void send() {
-    delete block_buffer;
+    free(block_buffer);
+    complete(0);
   }
   char* block_buffer;
 };
@@ -245,41 +247,57 @@ public:
 
 class UpdateToMeta : public BlockOp{
 public:
-  UpdateToMeta(Block* block, BlockRequest* block_request,
-               BlockOp* block_op, store::DataStore* data_store) :
+  UpdateToMeta(bool* dirty_flag, uint32_t entry_id, store::DataStore* data_store,
+               Block* block, BlockRequest* block_request, BlockOp* block_op) :
+               entry_id(entry_id), dirty_flag(dirty_flag),
                BlockOp(block, block_request, block_op),
                data_store(data_store) {
   }
   void send() {
     log_print("UpdateToMeta block: %lu", block->block_id);
-    // get status from policy
+    assert(entry_id <= MAX_BLOCK_ID);
+    uint32_t status = entry_id;
+    if (!dirty_flag) {
+    // clean
+      status = status | ((block->status) << 30) | (0X0 << 31);
+    } else {
+    // dirty
+      status = status | ((block->status) << 30) | (0X1 << 31);
+    }
+    data_store->block_meta_update(block->block_id, status);  
     complete(0);
   }
   store::DataStore *data_store;
+  bool* dirty_flag;
+  uint32_t entry_id;
 };
 
 class SetDirtyToPolicy : public BlockOp{
 public:
-  SetDirtyToPolicy(Block* block, BlockRequest* block_request,
-                   BlockOp* block_op) :
+  SetDirtyToPolicy(bool* dirty_flag, Block* block, BlockRequest* block_request,
+                   BlockOp* block_op) : dirty_flag(dirty_flag),
                    BlockOp(block, block_request, block_op) {
   }
   void send() {
     log_print("SetDirtyToPolicy block: %lu", block->block_id);
+    *dirty_flag = true;
     complete(0);
   }
+  bool* dirty_flag;
 };
 
 class SetCleanToPolicy : public BlockOp{
 public:
-  SetCleanToPolicy(Block* block, BlockRequest* block_request,
-                   BlockOp* block_op) :
+  SetCleanToPolicy(bool* dirty_flag,  Block* block, BlockRequest* block_request,
+                   BlockOp* block_op) : dirty_flag(dirty_flag),
                    BlockOp(block, block_request, block_op) {
   }
   void send() {
     log_print("SetCleanToPolicy block: %lu", block->block_id);
+    *dirty_flag = false;
     complete(0);
   }
+  bool* dirty_flag;
 };
 
 class DoNothing : public BlockOp{
