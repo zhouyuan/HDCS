@@ -13,9 +13,9 @@ namespace hdcs {
 namespace core {
 
 struct Entry {
-  Entry (uint64_t entry_id) : entry_id(entry_id), is_dirty(false) {
+  Entry (uint32_t entry_id) : entry_id(entry_id), is_dirty(false) {
   }
-  const uint64_t entry_id;
+  const uint32_t entry_id;
   bool is_dirty;
 };  
 
@@ -23,7 +23,7 @@ typedef std::vector<Entry> Entries;
 class CachePolicy : public Policy {
 public:
   CachePolicy(uint64_t total_size, uint64_t cache_size, uint32_t block_size,
-              store::DataStore *data_store, store::DataStore *back_store);
+              Block** block_map, store::DataStore *data_store, store::DataStore *back_store);
   ~CachePolicy();
   BlockOp* map(BlockRequest &&block_request, BlockOp** block_op_end);
 
@@ -40,6 +40,12 @@ private:
   uint32_t block_size;
   store::DataStore *data_store;
   store::DataStore *back_store;
+  struct EntryToBlock_t {
+    bool valid;
+    Block* block;
+    bool dirty_flag;
+    EntryToBlock_t(): valid(false){}
+  };
 };
 
 }//core

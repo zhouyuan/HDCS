@@ -14,17 +14,20 @@ class BlockGuard {
 public:
   BlockGuard(uint64_t total_size, uint32_t block_size) : 
          total_size(total_size), block_size(block_size) {
-    uint64_t block_count = total_size / block_size;
+    block_count = total_size / block_size;
     log_print("Total blocks: %lu", block_count);
+    block_map = new Block*[block_count]();
     for (uint64_t i = 0; i < block_count; i++) {
       Block* block = new Block(i, block_size);
-      block_map.insert(std::make_pair(i, block));
+      //block_map.insert(std::make_pair(i, block));
+      block_map[i] = block;
     }
   }
 
   ~BlockGuard() {
-    for (auto &block : block_map) {
-      delete block.second;
+    //for (auto &block : block_map) {
+    for (uint64_t i = 0; i < block_count; i++) {
+      delete block_map[i];
     }
   }
 
@@ -38,14 +41,17 @@ public:
     Block* block;
     uint64_t block_id;
 
+    std::lock_guard<std::mutex> lock(block_map_lock);
     while(left) {
       block_id = offset / block_size;
-      auto block_it = block_map.find(block_id);
+
+      /*auto block_it = block_map.find(block_id);
       if (block_it == block_map.end()) {
         log_print("hit block map end, block_map length: %lu, block_id: %lu\n", block_map.size(), block_id);
         assert(0);
       }
-      block = block_it->second;
+      block = block_it->second;*/
+      block = block_map[block_id];
 
       offset_by_block = offset % block_size;
       length_by_block = (block_size - offset_by_block) < left ?
@@ -59,10 +65,20 @@ public:
     }
   }
 
+  uint64_t get_block_count() {
+    return block_count;
+  }
+
+  BlockMap* get_block_map() {
+    return block_map;
+  }
+
 private:
-  BlockMap block_map;
+  std::mutex block_map_lock;
+  BlockMap *block_map;
   uint64_t total_size;
   uint32_t block_size;
+  uint64_t block_count;
 
 };
 

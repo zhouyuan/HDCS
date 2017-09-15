@@ -24,6 +24,7 @@ typedef uint32_t BLOCK_STATUS_TYPE;
                                 AioCompletion* on_finish) = 0;
     virtual int block_discard(uint64_t block_id) = 0;
     virtual int block_meta_update(uint64_t block_id, BLOCK_STATUS_TYPE status) = 0;
+    virtual BLOCK_STATUS_TYPE get_block_meta(uint64_t block_id) = 0;
   };
 }// store
 }// hdcs

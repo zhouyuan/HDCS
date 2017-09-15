@@ -27,6 +27,7 @@ namespace store {
     int block_aio_read(uint64_t block_id, char* data, AioCompletion* on_finish);
     int block_discard(uint64_t block_id){}
     int block_meta_update(uint64_t block_id, BLOCK_STATUS_TYPE status){}
+    BLOCK_STATUS_TYPE get_block_meta(uint64_t block_id){}
 
   private:
     std::string pool_name;
