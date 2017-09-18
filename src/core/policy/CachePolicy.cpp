@@ -74,6 +74,9 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       if (block->entry != nullptr){
         // in cache
         cache_entry = block->entry;
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+                                 &(cache_entry->is_dirty), cache_entry,
+                                 block, block_request_ptr, block_op);
         if (block_request.size < block->block_size) {
           // partial read
           posix_memalign((void**)&block_buffer, 4096, block->block_size);
@@ -93,6 +96,9 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
           // Found a free cache entry
           free_lru.remove((void*)cache_entry);
           block->entry = cache_entry;
+          block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+                                 &(cache_entry->is_dirty), cache_entry,
+                                 block, block_request_ptr, block_op);
           if (block_request_ptr->size < block->block_size) {
             // partial read
             posix_memalign((void**)&block_buffer, 4096, block->block_size);
@@ -125,7 +131,9 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       if (block->entry != nullptr){
         // in cache
         cache_entry = block->entry;
-        //block_op = new UpdateToMeta(block, &block_request, block_op, data_store); 
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+                                 &(cache_entry->is_dirty), cache_entry,
+                                 block, block_request_ptr, block_op);
         if (block_request_ptr->size < block->block_size) {
           // partial write
           posix_memalign((void**)&block_buffer, 4096, block->block_size);
@@ -149,6 +157,9 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         cache_entry = (Entry*)free_lru.get_head();
         if (cache_entry != nullptr) {
           // Found a free cache entry
+          block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+                                 &(cache_entry->is_dirty), cache_entry,
+                                 block, block_request_ptr, block_op);
           free_lru.remove((void*)cache_entry);
           block->entry = cache_entry;
           if (block_request_ptr->size < block->block_size) {
@@ -177,40 +188,25 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       }
       break;
     case IO_TYPE_DISCARD:
-      switch (block->status) {
-        case LOCATE_IN_CACHE:
-          /*block_op = new UpdateToMeta(block, &block_request, block_op, data_store); 
-          block_op = new SetBlockStatus(NOT_IN_CACHE, block, &block_request, block_op); 
-          block_op = new WriteBlockToBackend(block, &block_request, block_op, back_store); 
-          break;
-          */
-        case NOT_IN_CACHE:
-        default:
-          block_op = new DoNothing(block, block_request_ptr, block_op); 
-          break;
-      }//switch block->status
+      if (block->entry != nullptr){
+        // in cache
+        // Lock this block until discard done
+        block_op = new DemoteBlockToCache(cache_entry->entry_id, data_store,
+                                          block, block_request_ptr, block_op);
+      }
       break;
     case IO_TYPE_FLUSH:
-      switch (block->status) {
-        case LOCATE_IN_CACHE:
-          /*
-          block_op = new UpdateToMeta(block, &block_request, block_op, data_store); 
-          block_op = new SetCleanToPolicy(block, &block_request, block_op); 
-          block_op = new WriteBlockToBackend(block, &block_request, block_op, back_store); 
-          */
-          break;
-        case NOT_IN_CACHE:
-        default:
-          block_op = new DoNothing(block, block_request_ptr, block_op); 
-          break;
-      }// switch block->status
+      if (block->entry != nullptr){
+        // in cache
+
+      }
       break;
     default:
       block_op = new DoNothing(block, block_request_ptr, block_op); 
   }// switch io_type
   return block_op;
 }// map
-  
+ 
 }// core
 }// hdcs
 

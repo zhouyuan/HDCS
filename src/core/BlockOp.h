@@ -4,6 +4,7 @@
 
 #include "common/AioCompletion.h"
 #include "common/Log.h"
+#include "common/LRU_Linklist.h"
 #include "core/BlockRequest.h"
 #include "core/BlockMap.h"
 #include "store/SimpleStore/SimpleBlockStore.h"
@@ -14,6 +15,8 @@ namespace core {
 
 #define MAX_BLOCK_ID 1073741824 
 
+typedef LRU_LIST<void*> LRU_TYPE;
+class Entry;
 class BlockOp {
 public:
   BlockOp(Block* block, BlockRequest* block_request, BlockOp* block_op) :
@@ -245,6 +248,25 @@ public:
   char* data;
 };
 
+class DemoteBlockToCache : public BlockOp{
+public:
+  DemoteBlockToCache(uint64_t entry_id, store::DataStore* data_store,
+                    Block* block, BlockRequest* block_request, BlockOp* block_op) :
+                    BlockOp(block, block_request, block_op),
+                    entry_id(entry_id), data_store(data_store) {
+  }
+  void send() {
+    log_print("DemoteBlockToCache block: %lu", block->block_id);
+    int ret = data_store->block_discard(entry_id);
+    if (ret >= 0) {
+      block->status = NOT_IN_CACHE;
+    }
+    complete(ret);
+  }
+  uint64_t entry_id;
+  store::DataStore *data_store;
+};
+
 class UpdateToMeta : public BlockOp{
 public:
   UpdateToMeta(bool* dirty_flag, uint32_t entry_id, store::DataStore* data_store,
@@ -310,6 +332,30 @@ public:
     log_print("DoNothing block: %lu", block->block_id);
     complete(0);
   }
+};
+
+class UpdateLRU : public BlockOp{
+public:
+  UpdateLRU(LRU_TYPE* clean_lru, LRU_TYPE* dirty_lru,
+            bool* dirty_flag, Entry* entry,
+            Block* block, BlockRequest* block_request, BlockOp* block_op) :
+            clean_lru(clean_lru), dirty_lru(dirty_lru),
+            dirty_flag(dirty_flag), entry(entry),
+            BlockOp(block, block_request, block_op) {
+  }
+  void send() {
+    log_print("UpdateLRU block: %lu", block->block_id);
+    if (*dirty_flag) {
+      dirty_lru->touch_key(entry);
+    } else {
+      clean_lru->touch_key(entry);
+    }
+    complete(0);
+  }
+  LRU_TYPE* clean_lru;
+  LRU_TYPE* dirty_lru;
+  bool* dirty_flag;
+  Entry* entry;
 };
 
 } //core
