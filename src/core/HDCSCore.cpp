@@ -65,7 +65,9 @@ void HDCSCore::process() {
 
 void HDCSCore::process_request(Request *req) {
   // Request -> list<BlockRequest> -> list<BlockOp>
+  //std::mutex block_request_list_lock;
   BlockRequestList block_request_list;
+  //std::lock_guard<std::mutex> lock(block_request_list_lock);
   block_guard->create_block_requests(req, &block_request_list);
 
   for (auto &block_request : block_request_list) {
@@ -79,6 +81,8 @@ void HDCSCore::map_block(BlockRequest &&block_request) {
   Block* block = block_request.block;
   bool do_process = false;
   block->block_mutex.lock();
+  // If this block_request belongs to discard block,
+  // append to wait list firstly.
   BlockOp *block_ops_head = policy->map(std::move(block_request), &block_ops_end);
   if (!block->in_process) {
     block->in_process = true;

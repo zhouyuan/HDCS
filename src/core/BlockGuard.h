@@ -44,13 +44,6 @@ public:
     std::lock_guard<std::mutex> lock(block_map_lock);
     while(left) {
       block_id = offset / block_size;
-
-      /*auto block_it = block_map.find(block_id);
-      if (block_it == block_map.end()) {
-        log_print("hit block map end, block_map length: %lu, block_id: %lu\n", block_map.size(), block_id);
-        assert(0);
-      }
-      block = block_it->second;*/
       block = block_map[block_id];
 
       offset_by_block = offset % block_size;

@@ -9,6 +9,7 @@
 #include "core/BlockRequest.h"
 #include "core/BlockGuard.h"
 #include "core/policy/Policy.h"
+#include <mutex>
 
 namespace hdcs {
 namespace core {

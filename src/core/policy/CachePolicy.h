@@ -32,9 +32,9 @@ private:
   uint64_t cache_blocks_count;
   Entries entries;
   std::mutex entry_map_lock;
-  LRU_LIST<void*> free_lru;
-  LRU_LIST<void*> dirty_lru;
-  LRU_LIST<void*> clean_lru;
+  LRU_TYPE free_lru;
+  LRU_TYPE dirty_lru;
+  LRU_TYPE clean_lru;
   uint64_t total_size;
   uint64_t cache_size;
   uint32_t block_size;
