@@ -2,12 +2,24 @@
 #ifndef THREAD_POOL_HPP_
 #define THREAD_POOL_HPP_
 
-#include <stdio.h>
-#include "common/lib/boost/threadpool/threadpool.hpp"
+#include <atomic>
+#include <thread>
+#include <mutex>
+#include <vector>
+#include <list>
+#include <functional>
+#include <condition_variable>
 
-namespace hdcs {
-typedef boost::threadpool::pool ThreadPool;
-}
+class ThreadPool {
+ public:
+    ThreadPool(size_t thd_cnt):jobs_left(0), bailout(false),
+                               finished(false), ThreadCount(thd_cnt) {
+        for ( unsigned i = 0; i < ThreadCount; ++i )
+            threads.push_back(std::move(std::thread( [this,i]{ this->Task(); } )));
+    }
+    ~ThreadPool() {
+        JoinAll();
+    }
 
     void schedule(std::function<void(void)> job) {
         std::lock_guard<std::mutex> guard(queue_mutex);
@@ -16,10 +28,14 @@ typedef boost::threadpool::pool ThreadPool;
         job_available_var.notify_one();
     }
 
+    size_t Size() const {
+        return ThreadCount;
+    }
+
     void JoinAll(bool WaitForAll = true) {
         if ( !finished ) {
             if( WaitForAll ) {
-                wait();
+                WaitAll();
             }
 
             // note that we're done, and wake up any thread that's
@@ -31,6 +47,14 @@ typedef boost::threadpool::pool ThreadPool;
                 if( x.joinable() )
                     x.join();
             finished = true;
+        }
+    }
+
+    void WaitAll() {
+        if ( jobs_left > 0 ) {
+            std::unique_lock<std::mutex> lk( wait_mutex );
+            wait_var.wait( lk, [this]{ return this->jobs_left == 0; } );
+            lk.unlock();
         }
     }
 
@@ -90,6 +114,5 @@ typedef boost::threadpool::pool ThreadPool;
         return res;
     }
 };
-}  //  namespace dslab
 
 #endif  //  THREAD_POOL_HPP_
