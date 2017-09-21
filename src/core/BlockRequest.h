@@ -15,20 +15,25 @@ public:
                uint64_t size, Request* req,
                Block* block) :
                data_ptr(data_ptr), offset(offset), 
-               size(size), req(req), block(block) {
-    req->add_request();             
+               size(size), req(req), block(block),
+               should_delete(false) {
+    if (req != nullptr) {
+      req->add_request();  
+    }           
   }
   ~BlockRequest() {
   }
   void complete(int r) {
-    req->complete(r);
+    if (req != nullptr) {
+      req->complete(r);
+    }
   }
   Block* block;
   uint64_t offset;
   uint64_t size;
   char* data_ptr;
   Request* req;
-
+  bool should_delete;
 };
 typedef std::list<BlockRequest> BlockRequestList;
 

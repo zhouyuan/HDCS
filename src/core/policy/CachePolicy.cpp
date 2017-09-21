@@ -3,6 +3,7 @@
 #include "core/BlockRequest.h"
 #include "core/policy/CachePolicy.h"
 #include "common/LRU_Linklist.h"
+#include "common/AioCompletionImp.h"
 #include <stdlib.h>
 
 namespace hdcs {
@@ -10,10 +11,15 @@ namespace hdcs {
 namespace core {
 
 CachePolicy::CachePolicy(uint64_t total_size, uint64_t cache_size, uint32_t block_size,
-            Block** block_map, store::DataStore *data_store, store::DataStore *back_store) :
+            Block** block_map, store::DataStore *data_store, store::DataStore *back_store,
+            float cache_ratio_health,
+            WorkQueue<void*> *request_queue) :
             total_size(total_size), cache_size(cache_size),
             block_size(block_size), data_store(data_store),
-            back_store(back_store) {
+            back_store(back_store), go(true),
+            cache_ratio_health(cache_ratio_health),
+            request_queue(request_queue),
+            process_blocks_count(0) {
   blocks_count = total_size / block_size + 1; 
   cache_blocks_count = cache_size / block_size + 1; 
   for (int32_t i = cache_blocks_count - 1; i >= 0; i--) {
@@ -42,19 +48,23 @@ CachePolicy::CachePolicy(uint64_t total_size, uint64_t cache_size, uint32_t bloc
       entry.is_dirty = tmp_entry_to_block->dirty_flag;
       tmp_entry_to_block->block->entry = &entry;
       if (entry.is_dirty)
-        dirty_lru.touch_key(&entry);
+        dirty_lru.touch_key(tmp_entry_to_block->block);
       else
-        clean_lru.touch_key(&entry);
+        clean_lru.touch_key(tmp_entry_to_block->block);
     } else {
       free_lru.touch_key(&entry);
     }
   }
   delete entry_to_block_map;
+  process_thread = new std::thread(std::bind(&CachePolicy::process, this));
 }
 
 CachePolicy::~CachePolicy() {
+  go = false;
+  process_thread->join();
   delete data_store;
   delete back_store;
+  delete process_thread;
 }
 
 BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) {
@@ -74,7 +84,7 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       if (block->entry != nullptr){
         // in cache
         cache_entry = block->entry;
-        block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
                                  &(cache_entry->is_dirty), cache_entry,
                                  block, block_request_ptr, block_op);
         if (block_request.size < block->block_size) {
@@ -96,7 +106,7 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
           // Found a free cache entry
           free_lru.remove((void*)cache_entry);
           block->entry = cache_entry;
-          block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+          block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
                                  &(cache_entry->is_dirty), cache_entry,
                                  block, block_request_ptr, block_op);
           if (block_request_ptr->size < block->block_size) {
@@ -131,7 +141,7 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       if (block->entry != nullptr){
         // in cache
         cache_entry = block->entry;
-        block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
                                  &(cache_entry->is_dirty), cache_entry,
                                  block, block_request_ptr, block_op);
         if (block_request_ptr->size < block->block_size) {
@@ -157,7 +167,7 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         cache_entry = (Entry*)free_lru.get_head();
         if (cache_entry != nullptr) {
           // Found a free cache entry
-          block_op = new UpdateLRU(&clean_lru, &dirty_lru,
+          block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
                                  &(cache_entry->is_dirty), cache_entry,
                                  block, block_request_ptr, block_op);
           free_lru.remove((void*)cache_entry);
@@ -187,18 +197,58 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         }
       }
       break;
-    case IO_TYPE_DISCARD:
+    case IO_TYPE_DEMOTE_CACHE:
       if (block->entry != nullptr){
         // in cache
         // Lock this block until discard done
-        block_op = new DemoteBlockToCache(cache_entry->entry_id, data_store,
+        block->in_discard_process = true;
+        block_op = new ReleaseDiscardBlock(block, block_request_ptr, block_op);
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
+                                 nullptr, cache_entry,
+                                 block, block_request_ptr, block_op);
+        block_op = new UpdateToMeta(nullptr, 0, data_store, block, block_request_ptr, block_op);
+        block_op = new ResetCacheEntry(&(block->entry->is_dirty), block, block_request_ptr, block_op);
+        block_op = new DemoteBlockToCache(block->entry->entry_id, data_store,
                                           block, block_request_ptr, block_op);
+        block_op = new FlushBlockToBackend(block->entry->entry_id, &(block->entry->is_dirty),
+                                           block_request_ptr->data_ptr,
+                                           back_store, data_store,
+                                           block, block_request_ptr, block_op); 
       }
+      break;
+    case IO_TYPE_DISCARD:
+      // Lock this block until discard done
+      block->in_discard_process = true;
+      block_op = new ReleaseDiscardBlock(block, block_request_ptr, block_op);
+      if (block->entry != nullptr){
+        // in cache
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
+                                 nullptr, cache_entry,
+                                 block, block_request_ptr, block_op);
+        block_op = new UpdateToMeta(nullptr, 0, data_store, block, block_request_ptr, block_op);
+        block_op = new ResetCacheEntry(&(block->entry->is_dirty), block, block_request_ptr, block_op);
+        block_op = new DemoteBlockToCache(block->entry->entry_id, data_store,
+                                          block, block_request_ptr, block_op);
+        block_op = new FlushBlockToBackend(block->entry->entry_id, &(block->entry->is_dirty),
+                                           block_request_ptr->data_ptr,
+                                           back_store, data_store,
+                                           block, block_request_ptr, block_op); 
+      }
+      // not in cache
+      block_op = new DiscardBlockToBackend(back_store, block, block_request_ptr, block_op);
       break;
     case IO_TYPE_FLUSH:
       if (block->entry != nullptr){
         // in cache
-
+        block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
+                                 &(block->entry->is_dirty), block->entry,
+                                 block, block_request_ptr, block_op);
+        block_op = new UpdateToMeta(&(block->entry->is_dirty), block->entry->entry_id, data_store, block, block_request_ptr, block_op);
+        block_op = new SetCleanToPolicy(&(block->entry->is_dirty), block, block_request_ptr, block_op);
+        block_op = new FlushBlockToBackend(block->entry->entry_id, &(block->entry->is_dirty),
+                                           block_request_ptr->data_ptr,
+                                           back_store, data_store,
+                                           block, block_request_ptr, block_op); 
       }
       break;
     default:
@@ -206,6 +256,58 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
   }// switch io_type
   return block_op;
 }// map
+
+void CachePolicy::process() {
+  std::unique_lock<std::mutex> unique_lock(process_thread_cond_lock);
+  while(go) {
+    uint64_t dirty_block_count = dirty_lru.get_length();
+    uint64_t clean_block_count = clean_lru.get_length();
+    uint64_t total_cached_block = dirty_block_count + clean_block_count;
+    Block** block_list;
+
+    // prepare need to be flushed and evict blocks
+    int64_t need_to_evict_count = total_cached_block - cache_ratio_health * cache_blocks_count;
+    if (need_to_evict_count < 0) {
+      continue;
+    }
+    uint64_t need_to_flush_count = 0;
+    if (need_to_evict_count > clean_block_count) {
+      need_to_flush_count = need_to_evict_count - clean_block_count;
+    } else {
+      need_to_flush_count = 0;
+    }
+    block_list = (Block**)malloc(sizeof(Block*)*need_to_evict_count+1);
+    memset(block_list, 0, need_to_evict_count+1);
+    if (need_to_flush_count) {
+      dirty_lru.get_keys((void**)block_list, need_to_flush_count, false);
+    }
+    clean_lru.get_keys((void**)(block_list+need_to_flush_count), (need_to_evict_count - need_to_flush_count), false);
+
+    //queue req to request_queue
+    process_blocks_count += need_to_evict_count;
+    Request* req;
+    char* data;
+    AioCompletion* comp;
+    Block* block;
+    for (uint64_t i = 0; i < need_to_evict_count; i++) {
+      // do demote cache one by one
+      block = block_list[i];
+      log_print("cache_policy demote block_id: %lu", block->block_id);
+      comp = new AioCompletionImp([this](ssize_t r){
+        if (--process_blocks_count == 0) {
+          process_thread_cond.notify_all();
+          log_print("Signal cache_policy process to continue");
+        }
+      });
+      posix_memalign((void**)&data, 4096, sizeof(char)*block->block_size);
+      comp->set_reserved_ptr((void*)data);
+      req = new Request(IO_TYPE_DEMOTE_CACHE, data, (block->block_id * block->block_size), block->block_size, comp);
+      request_queue->enqueue((void*)req);
+    }
+    free(block_list);
+    process_thread_cond.wait(unique_lock, [&]{return process_blocks_count==0;});
+  }
+}
  
 }// core
 }// hdcs

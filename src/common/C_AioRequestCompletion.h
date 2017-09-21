@@ -45,6 +45,8 @@ public:
       std::unique_lock<std::mutex> unique_lock(cond_lock);
       m_cond.wait_for(unique_lock, std::chrono::milliseconds(50), [&]{return completed;});
     }
+
+    void set_reserved_ptr(void* ptr){}
 };
 
 }// hdcs

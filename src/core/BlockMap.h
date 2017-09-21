@@ -26,13 +26,15 @@ struct Block {
   Block(uint64_t block_id, uint32_t block_size):
     block_id(block_id), block_size(block_size),
     status(NOT_IN_CACHE), entry(nullptr),
-    in_process(false), block_ops_end(nullptr) {}
+    in_process(false), block_ops_end(nullptr),
+    in_discard_process(false) {}
   uint64_t block_id;
   uint32_t block_size;
   BlockStatus status;
   Entry* entry;
   std::mutex block_mutex;
   bool in_process;
+  bool in_discard_process;
   BlockOp* block_ops_end;
 };
 
