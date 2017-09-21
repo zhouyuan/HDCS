@@ -23,11 +23,13 @@ namespace core {
     void aio_write (const char* data, uint64_t offset, uint64_t length, void* c);
   private:
     ThreadPool *hdcs_op_threads;
-    ThreadPool *main_thread;
+    std::thread *main_thread;
     bool go;
     Config *config;
     Policy* policy;
     BlockGuard* block_guard;
+    std::mutex block_request_list_lock;
+    BlockRequestList block_request_list;
 
     void process();
     void process_request(Request *req);

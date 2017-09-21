@@ -267,6 +267,21 @@ public:
   store::DataStore *data_store;
 };
 
+class DiscardBlockToBackend : public BlockOp{
+public:
+  DiscardBlockToBackend(store::DataStore* back_store,
+                    Block* block, BlockRequest* block_request, BlockOp* block_op) :
+                    BlockOp(block, block_request, block_op),
+                    back_store(back_store) {
+  }
+  void send() {
+    log_print("DemoteBlockToCache block: %lu", block->block_id);
+    int ret = back_store->block_discard(block->block_id);
+    complete(ret);
+  }
+  store::DataStore *back_store;
+};
+
 class UpdateToMeta : public BlockOp{
 public:
   UpdateToMeta(bool* dirty_flag, uint32_t entry_id, store::DataStore* data_store,
@@ -279,12 +294,16 @@ public:
     log_print("UpdateToMeta block: %lu", block->block_id);
     assert(entry_id <= MAX_BLOCK_ID);
     uint32_t status = entry_id;
-    if (!dirty_flag) {
-    // clean
-      status = status | ((block->status) << 30) | (0X0 << 31);
+    if (dirty_flag == nullptr) {
+        status = 0;
     } else {
-    // dirty
-      status = status | ((block->status) << 30) | (0X1 << 31);
+      if (!(*dirty_flag)) {
+      // clean
+        status = status | ((block->status) << 30) | (0X0 << 31);
+      } else {
+      // dirty
+        status = status | ((block->status) << 30) | (0X1 << 31);
+      }
     }
     data_store->block_meta_update(block->block_id, status);  
     complete(0);
@@ -336,26 +355,103 @@ public:
 
 class UpdateLRU : public BlockOp{
 public:
-  UpdateLRU(LRU_TYPE* clean_lru, LRU_TYPE* dirty_lru,
+  UpdateLRU(LRU_TYPE* clean_lru, LRU_TYPE* dirty_lru, LRU_TYPE* free_lru,
             bool* dirty_flag, Entry* entry,
             Block* block, BlockRequest* block_request, BlockOp* block_op) :
-            clean_lru(clean_lru), dirty_lru(dirty_lru),
+            clean_lru(clean_lru), dirty_lru(dirty_lru), free_lru(free_lru),
             dirty_flag(dirty_flag), entry(entry),
             BlockOp(block, block_request, block_op) {
   }
   void send() {
     log_print("UpdateLRU block: %lu", block->block_id);
-    if (*dirty_flag) {
-      dirty_lru->touch_key(entry);
-    } else {
-      clean_lru->touch_key(entry);
+    if (dirty_flag == nullptr) {
+      clean_lru->remove(block);
+      dirty_lru->remove(block);
+      free_lru->touch_key(entry);
+    } else { 
+      if (*dirty_flag) {
+        clean_lru->remove(block);
+        dirty_lru->touch_key(block);
+        //add this block to timer here
+
+      } else {
+        dirty_lru->remove(block);
+        clean_lru->touch_key(block);
+      }
     }
     complete(0);
   }
   LRU_TYPE* clean_lru;
   LRU_TYPE* dirty_lru;
+  LRU_TYPE* free_lru;
   bool* dirty_flag;
   Entry* entry;
+};
+
+class ResetCacheEntry : public BlockOp{
+public:
+  ResetCacheEntry(bool* dirty_flag, Block* block,
+                  BlockRequest* block_request, BlockOp* block_op) :
+                  dirty_flag(dirty_flag),
+                  BlockOp(block, block_request, block_op){
+  }
+  void send() {
+    log_print("ResetCacheEntry block: %lu", block->block_id);
+    *dirty_flag = false;
+    block->block_mutex.lock();
+    block->entry = nullptr;
+    block->block_mutex.unlock();
+    complete(0);
+  }
+  bool* dirty_flag;
+};
+
+class ReleaseDiscardBlock : public BlockOp{
+public:
+  ReleaseDiscardBlock(Block* block, BlockRequest* block_request, BlockOp* block_op) :
+                      BlockOp(block, block_request, block_op){
+  }
+  void send() {
+    log_print("ReleaseDiscardBlock block: %lu", block->block_id);
+    block->block_mutex.lock();
+    block->in_discard_process = false;
+    block->block_mutex.unlock();
+    complete(0);
+  }
+};
+
+class FlushBlockToBackend : public BlockOp{
+public:
+  FlushBlockToBackend(uint64_t entry_id, bool* dirty_flag,
+                     char* data,
+                     store::DataStore* back_store,
+                     store::DataStore* data_store,
+                     Block* block,
+                     BlockRequest* block_request,
+                     BlockOp* block_op) :
+                     BlockOp(block, block_request, block_op),
+                     entry_id(entry_id),
+                     dirty_flag(dirty_flag),
+                     data(data),
+                     data_store(data_store),
+                     back_store(back_store) {
+  }
+  void send() {
+    log_print("FlushBlockToBackend block: %lu", block->block_id);
+    ssize_t ret = 0;
+    if (dirty_flag) {
+      uint64_t offset = block->block_id * block->block_size;
+      ret = data_store->block_read(entry_id, data);
+      ret = back_store->write(data, offset, block->block_size);
+    }
+    complete(ret);
+  }
+private:
+  uint64_t entry_id;
+  char* data;
+  bool* dirty_flag;
+  store::DataStore *data_store;
+  store::DataStore *back_store;
 };
 
 } //core
