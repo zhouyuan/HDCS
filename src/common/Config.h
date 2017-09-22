@@ -21,26 +21,20 @@ class Config{
 public:
     typedef std::map<std::string, std::string> ConfigInfo;
     ConfigInfo configValues{
+        {"log_to_file","false"},
+        {"rbd_pool_name","rbd"},
+        {"rbd_volume_name","volume_1"},
+        {"cache_dir","/tmp/"},
+        {"total_size","4096"},
+        {"cache_total_size","10737418240"},
+        {"cache_ratio_health","0.85"},
+        {"cache_dirty_timeout_nanoseconds", "10000000000"},
+        {"cache_min_alloc_size","4096"},
+        {"cacheservice_threads_num","64"},
         {"master_ip",  "127.0.0.1"},
         {"slave_ip",  "192.168.5.11"},
         {"messenger_port",  "9090"},
-        {"slave_messenger_port",  "9091"},
-        {"enable_MemoryUsageTracker","false"},
-        {"cache_dir","/tmp/"},
-        {"cache_min_alloc_size","4096"},
-        {"total_size","4096"},
-        {"cache_total_size","10737418240"},
-        {"cache_dirty_ratio_min","0.85"},
-        {"cache_ratio_max","0.9"},
-        {"cache_ratio_health","0.85"},
-        {"cache_flush_interval","1"},
-        {"cache_evict_interval","1"},
-        {"cache_flush_queue_depth","64"},
-        {"agent_threads_num","64"},
-        {"cacheservice_threads_num","64"},
-        {"log_to_file","false"},
-        {"rbd_pool_name","rbd"},
-        {"rbd_volume_name","volume_1"}
+        {"slave_messenger_port",  "9091"}
     };
     Config(std::string name){
 

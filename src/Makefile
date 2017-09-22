@@ -3,7 +3,7 @@ LIBRBC_VERSION = 1.5.0
 CC=cc
 CXX=g++
 PLATFORM=OS_LINUX
-OPTIMIZATION?=-O0
+OPTIMIZATION?=-O2
 OPT=$(OPTIMIZATION)
 CXXFLAGS=-std=c++11 ${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 CCFLAGS=${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
@@ -32,9 +32,9 @@ $(DIST_LIB): $(COMMON_OBJECTS) $(RBD_OBJECTS)
 	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
 
 clean:
-	rm core/*.o store/SimpleStore/*.o store/RBD/*.o core/policy/*.o libhdcs.so
+	rm -rf common/*.o core/*.o store/SimpleStore/*.o store/RBD/*.o core/policy/*.o libhdcs.so
 	rm -rf /usr/local/include/hdcs
-	rm /usr/local/lib/libhdcs.so
+	rm -rf /usr/local/lib/libhdcs.so
 
 install:
 	cp -r include/ /usr/local/include/hdcs

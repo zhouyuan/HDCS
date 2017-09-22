@@ -3,7 +3,9 @@
 #define HDCS_BLOCK_OP_H
 
 #include "common/AioCompletion.h"
+#include "common/AioCompletionImp.h"
 #include "common/Log.h"
+#include "common/Timer.h"
 #include "common/LRU_Linklist.h"
 #include "core/BlockRequest.h"
 #include "core/BlockMap.h"
@@ -356,10 +358,14 @@ public:
 class UpdateLRU : public BlockOp{
 public:
   UpdateLRU(LRU_TYPE* clean_lru, LRU_TYPE* dirty_lru, LRU_TYPE* free_lru,
-            bool* dirty_flag, Entry* entry,
+            bool* dirty_flag, uint64_t timeout_nanosecond, Entry* entry,
+            AioCompletion** entry_timeout_comp_ptr, SafeTimer* timer,
+            AioCompletion* timeout_comp_def,
             Block* block, BlockRequest* block_request, BlockOp* block_op) :
             clean_lru(clean_lru), dirty_lru(dirty_lru), free_lru(free_lru),
-            dirty_flag(dirty_flag), entry(entry),
+            dirty_flag(dirty_flag), timeout_nanosecond(timeout_nanosecond),
+            entry_timeout_comp_ptr(entry_timeout_comp_ptr), timer(timer),
+            timeout_comp_def(timeout_comp_def), entry(entry),
             BlockOp(block, block_request, block_op) {
   }
   void send() {
@@ -373,8 +379,23 @@ public:
         clean_lru->remove(block);
         dirty_lru->touch_key(block);
         //add this block to timer here
-
+        if (entry_timeout_comp_ptr != nullptr) {
+          if (*entry_timeout_comp_ptr != nullptr) {
+            timer->cancel_event(*entry_timeout_comp_ptr);
+          }
+          *entry_timeout_comp_ptr = timeout_comp_def;
+          if (timer != nullptr && timeout_nanosecond != 0) {
+            timer->add_event_after(timeout_nanosecond, timeout_comp_def);
+          }
+        }
       } else {
+        if (entry_timeout_comp_ptr != nullptr) {
+          delete timeout_comp_def;
+          if (*entry_timeout_comp_ptr != nullptr) {
+            timer->cancel_event(*entry_timeout_comp_ptr);
+            *entry_timeout_comp_ptr = nullptr;
+          }
+        }
         dirty_lru->remove(block);
         clean_lru->touch_key(block);
       }
@@ -386,24 +407,34 @@ public:
   LRU_TYPE* free_lru;
   bool* dirty_flag;
   Entry* entry;
+  uint64_t timeout_nanosecond;
+  AioCompletion** entry_timeout_comp_ptr;
+  AioCompletion* timeout_comp_def;
+  SafeTimer* timer;
 };
 
 class ResetCacheEntry : public BlockOp{
 public:
-  ResetCacheEntry(bool* dirty_flag, Block* block,
+  ResetCacheEntry(bool* dirty_flag,
+                  AioCompletion** entry_timeout_comp_ptr,
+                  Block* block,
                   BlockRequest* block_request, BlockOp* block_op) :
                   dirty_flag(dirty_flag),
+                  entry_timeout_comp_ptr(entry_timeout_comp_ptr),
                   BlockOp(block, block_request, block_op){
   }
   void send() {
     log_print("ResetCacheEntry block: %lu", block->block_id);
     *dirty_flag = false;
+    *entry_timeout_comp_ptr = nullptr;
+
     block->block_mutex.lock();
     block->entry = nullptr;
     block->block_mutex.unlock();
     complete(0);
   }
   bool* dirty_flag;
+  AioCompletion** entry_timeout_comp_ptr;
 };
 
 class ReleaseDiscardBlock : public BlockOp{

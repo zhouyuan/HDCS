@@ -13,13 +13,15 @@ namespace core {
 CachePolicy::CachePolicy(uint64_t total_size, uint64_t cache_size, uint32_t block_size,
             Block** block_map, store::DataStore *data_store, store::DataStore *back_store,
             float cache_ratio_health,
-            WorkQueue<void*> *request_queue) :
+            WorkQueue<void*> *request_queue,
+            uint64_t timeout_nanoseconds) :
             total_size(total_size), cache_size(cache_size),
             block_size(block_size), data_store(data_store),
             back_store(back_store), go(true),
             cache_ratio_health(cache_ratio_health),
             request_queue(request_queue),
-            process_blocks_count(0) {
+            process_blocks_count(0),
+            timeout_nanoseconds(timeout_nanoseconds) {
   blocks_count = total_size / block_size + 1; 
   cache_blocks_count = cache_size / block_size + 1; 
   for (int32_t i = cache_blocks_count - 1; i >= 0; i--) {
@@ -78,6 +80,22 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
   BlockOp* block_op = new BlockRequestComplete(block, std::move(block_request), nullptr);
   BlockRequest* block_request_ptr = block_op->block_request;
   *block_op_end = block_op;
+
+  uint64_t block_id = block->block_id;
+  uint64_t block_size = block->block_size;
+  AioCompletion *entry_timeout_comp_ptr = nullptr;
+  if (timeout_nanoseconds != 0) {
+    entry_timeout_comp_ptr = new AioCompletionImp([&, block_id, block_size](ssize_t r){
+      log_print("entry_timeout, block: %lu", block_id);
+      AioCompletion *comp = new AioCompletionImp();
+      char* data;
+      posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+      comp->set_reserved_ptr((void*)data);
+      Request* req = new Request(IO_TYPE_FLUSH, data, (block_id * block_size), block_size, comp);
+      request_queue->enqueue((void*)req);
+    });
+  }
+
   switch (block_request.req->io_type) {
     case IO_TYPE_READ:
     // read
@@ -85,7 +103,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         // in cache
         cache_entry = block->entry;
         block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(cache_entry->is_dirty), cache_entry,
+                                 &(cache_entry->is_dirty), timeout_nanoseconds,
+                                 block->entry,
+                                 &(cache_entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
         if (block_request.size < block->block_size) {
           // partial read
@@ -107,7 +128,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
           free_lru.remove((void*)cache_entry);
           block->entry = cache_entry;
           block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(cache_entry->is_dirty), cache_entry,
+                                 &(cache_entry->is_dirty), timeout_nanoseconds,
+                                 block->entry,
+                                 &(cache_entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
           if (block_request_ptr->size < block->block_size) {
             // partial read
@@ -142,7 +166,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         // in cache
         cache_entry = block->entry;
         block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(cache_entry->is_dirty), cache_entry,
+                                 &(cache_entry->is_dirty), timeout_nanoseconds,
+                                 block->entry,
+                                 &(cache_entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
         if (block_request_ptr->size < block->block_size) {
           // partial write
@@ -168,7 +195,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         if (cache_entry != nullptr) {
           // Found a free cache entry
           block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(cache_entry->is_dirty), cache_entry,
+                                 &(cache_entry->is_dirty), timeout_nanoseconds,
+                                 block->entry,
+                                 &(cache_entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
           free_lru.remove((void*)cache_entry);
           block->entry = cache_entry;
@@ -204,10 +234,13 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         block->in_discard_process = true;
         block_op = new ReleaseDiscardBlock(block, block_request_ptr, block_op);
         block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 nullptr, cache_entry,
+                                 nullptr, timeout_nanoseconds,
+                                 block->entry,
+                                 &(block->entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
         block_op = new UpdateToMeta(nullptr, 0, data_store, block, block_request_ptr, block_op);
-        block_op = new ResetCacheEntry(&(block->entry->is_dirty), block, block_request_ptr, block_op);
+        block_op = new ResetCacheEntry(&(block->entry->is_dirty), &(block->entry->timeout_comp), block, block_request_ptr, block_op);
         block_op = new DemoteBlockToCache(block->entry->entry_id, data_store,
                                           block, block_request_ptr, block_op);
         block_op = new FlushBlockToBackend(block->entry->entry_id, &(block->entry->is_dirty),
@@ -223,10 +256,13 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       if (block->entry != nullptr){
         // in cache
         block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 nullptr, cache_entry,
+                                 nullptr, timeout_nanoseconds,
+                                 block->entry,
+                                 &(block->entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
         block_op = new UpdateToMeta(nullptr, 0, data_store, block, block_request_ptr, block_op);
-        block_op = new ResetCacheEntry(&(block->entry->is_dirty), block, block_request_ptr, block_op);
+        block_op = new ResetCacheEntry(&(block->entry->is_dirty), &(block->entry->timeout_comp), block, block_request_ptr, block_op);
         block_op = new DemoteBlockToCache(block->entry->entry_id, data_store,
                                           block, block_request_ptr, block_op);
         block_op = new FlushBlockToBackend(block->entry->entry_id, &(block->entry->is_dirty),
@@ -241,7 +277,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       if (block->entry != nullptr){
         // in cache
         block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(block->entry->is_dirty), block->entry,
+                                 &(block->entry->is_dirty), timeout_nanoseconds,
+                                 block->entry,
+                                 &(block->entry->timeout_comp), &timer,
+                                 entry_timeout_comp_ptr,
                                  block, block_request_ptr, block_op);
         block_op = new UpdateToMeta(&(block->entry->is_dirty), block->entry->entry_id, data_store, block, block_request_ptr, block_op);
         block_op = new SetCleanToPolicy(&(block->entry->is_dirty), block, block_request_ptr, block_op);
@@ -275,6 +314,10 @@ void CachePolicy::process() {
       need_to_flush_count = need_to_evict_count - clean_block_count;
     } else {
       need_to_flush_count = 0;
+    }
+    if (need_to_evict_count == 0) {
+      sleep(1);
+      continue;
     }
     block_list = (Block**)malloc(sizeof(Block*)*need_to_evict_count+1);
     memset(block_list, 0, need_to_evict_count+1);
