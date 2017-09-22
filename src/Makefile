@@ -32,9 +32,9 @@ $(DIST_LIB): $(COMMON_OBJECTS) $(RBD_OBJECTS)
 	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
 
 clean:
-	rm core/*.o store/SimpleStore/*.o store/RBD/*.o core/policy/*.o libhdcs.so
+	rm -rf common/*.o core/*.o store/SimpleStore/*.o store/RBD/*.o core/policy/*.o libhdcs.so
 	rm -rf /usr/local/include/hdcs
-	rm /usr/local/lib/libhdcs.so
+	rm -rf /usr/local/lib/libhdcs.so
 
 install:
 	cp -r include/ /usr/local/include/hdcs

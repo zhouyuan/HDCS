@@ -7,6 +7,8 @@
 #include "common/LRU_Linklist.h"
 #include "store/DataStore.h"
 #include "common/WorkQueue.h"
+#include "common/AioCompletion.h"
+#include "common/Timer.h"
 #include <mutex>
 #include <condition_variable>
 
@@ -15,10 +17,11 @@ namespace hdcs {
 namespace core {
 
 struct Entry {
-  Entry (uint32_t entry_id) : entry_id(entry_id), is_dirty(false) {
+  Entry (uint32_t entry_id) : entry_id(entry_id), is_dirty(false), timeout_comp(nullptr) {
   }
   const uint32_t entry_id;
   bool is_dirty;
+  AioCompletion* timeout_comp;
 };  
 
 typedef std::vector<Entry> Entries;
@@ -28,7 +31,9 @@ public:
               Block** block_map,
               store::DataStore *data_store,
               store::DataStore *back_store,
-              float cache_ratio_health, WorkQueue<void*> *request_queue);
+              float cache_ratio_health,
+              WorkQueue<void*> *request_queue,
+              uint64_t timeout_nanoseconds);
   ~CachePolicy();
   BlockOp* map(BlockRequest &&block_request, BlockOp** block_op_end);
 
@@ -45,10 +50,12 @@ private:
   uint64_t total_size;
   uint64_t cache_size;
   uint32_t block_size;
+  uint64_t timeout_nanoseconds;
   store::DataStore *data_store;
   store::DataStore *back_store;
   float cache_ratio_health;
   WorkQueue<void*> *request_queue;
+  SafeTimer timer;
 
   std::thread *process_thread;
   std::condition_variable process_thread_cond;

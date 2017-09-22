@@ -27,6 +27,7 @@ HDCSCore::HDCSCore() {
   uint64_t block_size = stoull(config->configValues["cache_min_alloc_size"]);
   uint64_t cache_size = stoull(config->configValues["cache_total_size"]);
   float cache_ratio_health = stof(config->configValues["cache_ratio_health"]);
+  uint64_t timeout_nanosecond = stoull(config->configValues["cache_dirty_timeout_nanoseconds"]);
 
   std::string path = config->configValues["cache_dir_run"];
   std::string pool_name = config->configValues["rbd_pool_name"];
@@ -37,7 +38,7 @@ HDCSCore::HDCSCore() {
   policy = new CachePolicy(total_size, cache_size, block_size, block_ptr_map,
                       new store::SimpleBlockStore(path, cache_size, block_size),
                       new store::RBDImageStore(pool_name, volume_name, block_size),
-                      cache_ratio_health, &request_queue);
+                      cache_ratio_health, &request_queue, timeout_nanosecond);
 
   go = true;
   main_thread = new std::thread(std::bind(&HDCSCore::process, this));

@@ -3,7 +3,6 @@
 
 #include <queue>
 #include <mutex>
-//#include <std/thread.hpp>
 #include <condition_variable>
 #include <iostream>
 #include <chrono>
