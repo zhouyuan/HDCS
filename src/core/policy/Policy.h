@@ -9,6 +9,7 @@ namespace core {
   class Policy {
   public:
     virtual BlockOp* map(BlockRequest &&block_request, BlockOp** block_op_end) = 0;
+    virtual void flush_all() = 0;
 
   };
 

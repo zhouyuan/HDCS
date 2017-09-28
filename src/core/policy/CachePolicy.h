@@ -16,6 +16,10 @@ namespace hdcs {
 
 namespace core {
 
+typedef uint8_t CACHE_MODE_TYPE;
+#define CACHE_MODE_WRITE_BACK 0XF0
+#define CACHE_MODE_READ_ONLY 0XF1
+
 struct Entry {
   Entry (uint32_t entry_id) : entry_id(entry_id), is_dirty(false), timeout_comp(nullptr) {
   }
@@ -33,9 +37,12 @@ public:
               store::DataStore *back_store,
               float cache_ratio_health,
               WorkQueue<void*> *request_queue,
-              uint64_t timeout_nanoseconds);
+              uint64_t timeout_nanoseconds,
+              CACHE_MODE_TYPE cache_mode,
+              int process_threads_num);
   ~CachePolicy();
   BlockOp* map(BlockRequest &&block_request, BlockOp** block_op_end);
+  void flush_all();
 
 private:
   void process();
@@ -51,6 +58,8 @@ private:
   uint64_t cache_size;
   uint32_t block_size;
   uint64_t timeout_nanoseconds;
+  int process_threads_num;
+  CACHE_MODE_TYPE cache_mode;
   store::DataStore *data_store;
   store::DataStore *back_store;
   float cache_ratio_health;
@@ -61,6 +70,12 @@ private:
   std::condition_variable process_thread_cond;
   std::mutex process_thread_cond_lock;
   std::atomic<uint64_t> process_blocks_count;
+  
+  std::condition_variable dirty_flush_cond;
+  std::mutex dirty_flush_cond_lock;
+
+  std::condition_variable flush_all_cond;
+  std::mutex flush_all_cond_lock;
 
   struct EntryToBlock_t {
     bool valid;

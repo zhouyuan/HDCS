@@ -14,16 +14,22 @@ CachePolicy::CachePolicy(uint64_t total_size, uint64_t cache_size, uint32_t bloc
             Block** block_map, store::DataStore *data_store, store::DataStore *back_store,
             float cache_ratio_health,
             WorkQueue<void*> *request_queue,
-            uint64_t timeout_nanoseconds) :
+            uint64_t timeout_nanoseconds,
+            CACHE_MODE_TYPE cache_mode,
+            int process_threads_num) :
             total_size(total_size), cache_size(cache_size),
             block_size(block_size), data_store(data_store),
             back_store(back_store), go(true),
             cache_ratio_health(cache_ratio_health),
             request_queue(request_queue),
-            process_blocks_count(0),
-            timeout_nanoseconds(timeout_nanoseconds) {
+            timeout_nanoseconds(timeout_nanoseconds),
+            cache_mode(cache_mode),
+            process_threads_num(process_threads_num) {
   blocks_count = total_size / block_size + 1; 
   cache_blocks_count = cache_size / block_size + 1; 
+
+  process_blocks_count = 0;
+
   for (int32_t i = cache_blocks_count - 1; i >= 0; i--) {
     entries.push_back(Entry(i));
   }
@@ -86,13 +92,25 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
   AioCompletion *entry_timeout_comp_ptr = nullptr;
   if (timeout_nanoseconds != 0) {
     entry_timeout_comp_ptr = new AioCompletionImp([&, block_id, block_size](ssize_t r){
-      log_print("entry_timeout, block: %lu", block_id);
-      AioCompletion *comp = new AioCompletionImp();
+      //check current inflight flush, so we won't schedule too many
+      std::unique_lock<std::mutex> dirty_flush_unique_lock(dirty_flush_cond_lock);
+      dirty_flush_cond.wait(dirty_flush_unique_lock, [&]{
+          return process_blocks_count < (process_threads_num / 2);
+      });
+
+      //if current inflight flush is lower than throttle, create new flush request
+      //create a completion lambda to dec when flush done.
+      AioCompletion *comp = new AioCompletionImp([&, block_id](ssize_t r){
+        if (--process_blocks_count < (process_threads_num / 2)) {
+          dirty_flush_cond.notify_all();
+        }
+      });
       char* data;
       posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
       comp->set_reserved_ptr((void*)data);
       Request* req = new Request(IO_TYPE_FLUSH, data, (block_id * block_size), block_size, comp);
       request_queue->enqueue((void*)req);
+      process_blocks_count++;
     });
   }
 
@@ -162,70 +180,83 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
       break;
     case IO_TYPE_WRITE:
     // write
-      if (block->entry != nullptr){
-        // in cache
-        cache_entry = block->entry;
-        block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(cache_entry->is_dirty), timeout_nanoseconds,
-                                 block->entry,
-                                 &(cache_entry->timeout_comp), &timer,
-                                 entry_timeout_comp_ptr,
-                                 block, block_request_ptr, block_op);
-        if (block_request_ptr->size < block->block_size) {
-          // partial write
-          posix_memalign((void**)&block_buffer, 4096, block->block_size);
-          block_op = new UpdateToMeta(&(cache_entry->is_dirty), cache_entry->entry_id, data_store, block, block_request_ptr, block_op);
-          block_op = new SetDirtyToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
-          block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
-          block_op = new WriteBlockToCache(cache_entry->entry_id, block_buffer, data_store,
-                                           block, block_request_ptr, block_op); 
-          block_op = new WriteToBuffer(block_buffer, block, block_request_ptr, block_op);
-          block_op = new ReadBlockFromCache(cache_entry->entry_id, block_request_ptr->data_ptr,
-                                            data_store, block, block_request_ptr, block_op); 
-        } else {
-          // full block write
-          block_op = new UpdateToMeta(&(cache_entry->is_dirty), cache_entry->entry_id, data_store, block, block_request_ptr, block_op);
-          block_op = new SetDirtyToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
-          block_op = new WriteBlockToCache(cache_entry->entry_id, block_request_ptr->data_ptr, data_store,
-                                           block, block_request_ptr, block_op);
-        }
+      if (cache_mode == CACHE_MODE_READ_ONLY) {
+        block_op = new WriteToBackend(block_request_ptr->data_ptr, back_store,
+                                      block, block_request_ptr, block_op); 
       } else {
-        // not in cache
-        cache_entry = (Entry*)free_lru.get_head();
-        if (cache_entry != nullptr) {
-          // Found a free cache entry
+        if (block->entry != nullptr) {
+          // in cache
+          cache_entry = block->entry;
           block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
-                                 &(cache_entry->is_dirty), timeout_nanoseconds,
-                                 block->entry,
-                                 &(cache_entry->timeout_comp), &timer,
-                                 entry_timeout_comp_ptr,
-                                 block, block_request_ptr, block_op);
-          free_lru.remove((void*)cache_entry);
-          block->entry = cache_entry;
+                                   &(cache_entry->is_dirty), timeout_nanoseconds,
+                                   block->entry,
+                                   &(cache_entry->timeout_comp), &timer,
+                                   entry_timeout_comp_ptr,
+                                   block, block_request_ptr, block_op);
+          block_op = new UpdateToMeta(&(cache_entry->is_dirty), cache_entry->entry_id, data_store, block, block_request_ptr, block_op);
+          if (timeout_nanoseconds != 0) {
+            block_op = new SetDirtyToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
+          } else {
+            block_op = new SetCleanToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
+            block_op = new WriteToBackend(block_request_ptr->data_ptr, back_store,
+                                          block, block_request_ptr, block_op); 
+          }
           if (block_request_ptr->size < block->block_size) {
             // partial write
             posix_memalign((void**)&block_buffer, 4096, block->block_size);
-            block_op = new UpdateToMeta(&(cache_entry->is_dirty), cache_entry->entry_id, data_store, block, block_request_ptr, block_op);
-            block_op = new SetDirtyToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
             block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
             block_op = new WriteBlockToCache(cache_entry->entry_id, block_buffer, data_store,
                                              block, block_request_ptr, block_op); 
             block_op = new WriteToBuffer(block_buffer, block, block_request_ptr, block_op);
-            block_op = new PromoteFromBackend(block_buffer, back_store,
-                                              block, block_request_ptr, block_op); 
+            block_op = new ReadBlockFromCache(cache_entry->entry_id, block_request_ptr->data_ptr,
+                                              data_store, block, block_request_ptr, block_op); 
           } else {
             // full block write
-            block_op = new UpdateToMeta(&(cache_entry->is_dirty), cache_entry->entry_id, data_store, block, block_request_ptr, block_op);
-            block_op = new SetDirtyToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
             block_op = new WriteBlockToCache(cache_entry->entry_id, block_request_ptr->data_ptr, data_store,
                                              block, block_request_ptr, block_op);
           }
         } else {
-          // run out cache
-          block_op = new WriteToBackend(block_request_ptr->data_ptr, back_store,
-                                        block, block_request_ptr, block_op); 
-        }
-      }
+          // not in cache
+          cache_entry = (Entry*)free_lru.get_head();
+          if (cache_entry != nullptr) {
+            // Found a free cache entry
+            free_lru.remove((void*)cache_entry);
+            block->entry = cache_entry;
+            block_op = new UpdateLRU(&clean_lru, &dirty_lru, &free_lru,
+                                   &(cache_entry->is_dirty), timeout_nanoseconds,
+                                   block->entry,
+                                   &(cache_entry->timeout_comp), &timer,
+                                   entry_timeout_comp_ptr,
+                                   block, block_request_ptr, block_op);
+            block_op = new UpdateToMeta(&(cache_entry->is_dirty), cache_entry->entry_id, data_store, block, block_request_ptr, block_op);
+            if (timeout_nanoseconds != 0) {
+              block_op = new SetDirtyToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
+            } else {
+              block_op = new SetCleanToPolicy(&(cache_entry->is_dirty), block, block_request_ptr, block_op);
+              block_op = new WriteToBackend(block_request_ptr->data_ptr, back_store,
+                                          block, block_request_ptr, block_op); 
+            }
+            if (block_request_ptr->size < block->block_size) {
+              // partial write
+              posix_memalign((void**)&block_buffer, 4096, block->block_size);
+              block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
+              block_op = new WriteBlockToCache(cache_entry->entry_id, block_buffer, data_store,
+                                               block, block_request_ptr, block_op); 
+              block_op = new WriteToBuffer(block_buffer, block, block_request_ptr, block_op);
+              block_op = new PromoteFromBackend(block_buffer, back_store,
+                                                block, block_request_ptr, block_op); 
+            } else {
+              // full block write
+              block_op = new WriteBlockToCache(cache_entry->entry_id, block_request_ptr->data_ptr, data_store,
+                                               block, block_request_ptr, block_op);
+            }
+          } else {
+            // run out cache
+            block_op = new WriteToBackend(block_request_ptr->data_ptr, back_store,
+                                          block, block_request_ptr, block_op); 
+          }
+        } // end of not in cache
+      }// end of cache_write_back
       break;
     case IO_TYPE_DEMOTE_CACHE:
       if (block->entry != nullptr){
@@ -265,10 +296,6 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         block_op = new ResetCacheEntry(&(block->entry->is_dirty), &(block->entry->timeout_comp), block, block_request_ptr, block_op);
         block_op = new DemoteBlockToCache(block->entry->entry_id, data_store,
                                           block, block_request_ptr, block_op);
-        block_op = new FlushBlockToBackend(block->entry->entry_id, &(block->entry->is_dirty),
-                                           block_request_ptr->data_ptr,
-                                           back_store, data_store,
-                                           block, block_request_ptr, block_op); 
       }
       // not in cache
       block_op = new DiscardBlockToBackend(back_store, block, block_request_ptr, block_op);
@@ -327,17 +354,19 @@ void CachePolicy::process() {
     clean_lru.get_keys((void**)(block_list+need_to_flush_count), (need_to_evict_count - need_to_flush_count), false);
 
     //queue req to request_queue
-    process_blocks_count += need_to_evict_count;
     Request* req;
     char* data;
     AioCompletion* comp;
     Block* block;
     for (uint64_t i = 0; i < need_to_evict_count; i++) {
+      process_thread_cond.wait(unique_lock, [&]{
+        return process_blocks_count < (process_threads_num / 2);
+      });
       // do demote cache one by one
       block = block_list[i];
       log_print("cache_policy demote block_id: %lu", block->block_id);
       comp = new AioCompletionImp([this](ssize_t r){
-        if (--process_blocks_count == 0) {
+        if (--process_blocks_count < (process_threads_num / 2)) {
           process_thread_cond.notify_all();
           log_print("Signal cache_policy process to continue");
         }
@@ -346,10 +375,48 @@ void CachePolicy::process() {
       comp->set_reserved_ptr((void*)data);
       req = new Request(IO_TYPE_DEMOTE_CACHE, data, (block->block_id * block->block_size), block->block_size, comp);
       request_queue->enqueue((void*)req);
+      process_blocks_count++;
     }
     free(block_list);
-    process_thread_cond.wait(unique_lock, [&]{return process_blocks_count==0;});
   }
+}
+
+void CachePolicy::flush_all() {
+  std::unique_lock<std::mutex> unique_lock(flush_all_cond_lock);
+  uint64_t need_to_flush_count = dirty_lru.get_length();
+  Block** block_list;
+
+  // prepare need to be flushed and evict blocks
+  block_list = (Block**)malloc(sizeof(Block*)*need_to_flush_count+1);
+  memset(block_list, 0, need_to_flush_count+1);
+  if (need_to_flush_count) {
+    dirty_lru.get_keys((void**)block_list, need_to_flush_count, false);
+  }
+
+  //queue req to request_queue
+  //process_blocks_count += need_to_flush_count;
+  Request* req;
+  char* data;
+  AioCompletion* comp;
+  Block* block;
+  for (uint64_t i = 0; i < need_to_flush_count; i++) {
+    flush_all_cond.wait(unique_lock, [&]{
+      return process_blocks_count < process_threads_num;
+    });
+    // do demote cache one by one
+    block = block_list[i];
+    comp = new AioCompletionImp([this](ssize_t r){
+      if (--process_blocks_count < process_threads_num) {
+        flush_all_cond.notify_all();
+      }
+    });
+    posix_memalign((void**)&data, 4096, sizeof(char)*block->block_size);
+    comp->set_reserved_ptr((void*)data);
+    req = new Request(IO_TYPE_FLUSH, data, (block->block_id * block->block_size), block->block_size, comp);
+    request_queue->enqueue((void*)req);
+    process_blocks_count++;
+  }
+  free(block_list);
 }
  
 }// core

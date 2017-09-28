@@ -28,6 +28,7 @@ HDCSCore::HDCSCore() {
   uint64_t cache_size = stoull(config->configValues["cache_total_size"]);
   float cache_ratio_health = stof(config->configValues["cache_ratio_health"]);
   uint64_t timeout_nanosecond = stoull(config->configValues["cache_dirty_timeout_nanoseconds"]);
+  CACHE_MODE_TYPE cache_mode = config->configValues["cache_mode"].compare(std::string("readonly")) == 0 ? CACHE_MODE_READ_ONLY : CACHE_MODE_WRITE_BACK;
 
   std::string path = config->configValues["cache_dir_run"];
   std::string pool_name = config->configValues["rbd_pool_name"];
@@ -36,21 +37,26 @@ HDCSCore::HDCSCore() {
   block_guard = new BlockGuard(total_size, block_size);
   BlockMap* block_ptr_map = block_guard->get_block_map();
   policy = new CachePolicy(total_size, cache_size, block_size, block_ptr_map,
-                      new store::SimpleBlockStore(path, cache_size, block_size),
+                      new store::SimpleBlockStore(path, total_size, cache_size, block_size),
                       new store::RBDImageStore(pool_name, volume_name, block_size),
-                      cache_ratio_health, &request_queue, timeout_nanosecond);
+                      cache_ratio_health, &request_queue,
+                      timeout_nanosecond, cache_mode, hdcs_thread_max);
 
   go = true;
   main_thread = new std::thread(std::bind(&HDCSCore::process, this));
 }
 
 HDCSCore::~HDCSCore() {
+  delete policy;
   go = false;
   main_thread->join();
   delete hdcs_op_threads;
-  delete policy;
   delete block_guard;
   delete main_thread;
+}
+
+void HDCSCore::close() {
+  policy->flush_all();
 }
 
 void HDCSCore::queue_io(Request *req) {

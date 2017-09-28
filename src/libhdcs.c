@@ -31,6 +31,7 @@ int hdcs_open(hdcs_ioctx_t *io) {
 }
 
 int hdcs_close(hdcs_ioctx_t io) {
+  ((hdcs::core::HDCSCore*)io)->close();
   delete (hdcs::core::HDCSCore*)io;
   return 0;
 }
