@@ -10,7 +10,7 @@ namespace store {
 
   class SimpleBlockStore : public DataStore {
   public:
-    SimpleBlockStore(std::string store_path, uint64_t store_size, uint64_t block_size);
+    SimpleBlockStore(std::string store_path, uint64_t total_size, uint64_t store_size, uint64_t block_size);
     ~SimpleBlockStore();
 
     int write(char* data, uint64_t offset, uint64_t size){}

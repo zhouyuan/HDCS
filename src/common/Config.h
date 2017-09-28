@@ -25,6 +25,7 @@ public:
         {"rbd_pool_name","rbd"},
         {"rbd_volume_name","volume_1"},
         {"cache_dir","/tmp/"},
+        {"cache_mode","write_back"},
         {"total_size","4096"},
         {"cache_total_size","10737418240"},
         {"cache_ratio_health","0.85"},

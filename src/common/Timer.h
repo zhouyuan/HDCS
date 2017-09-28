@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <unordered_map>
 #include <map>
+#include <list>
 #include <time.h>
 #include <sys/time.h>
 #include <cmath>
@@ -82,11 +83,12 @@ private:
     while (go) {
       clock_gettime(CLOCK_REALTIME, &now);
       now_l = to_nanoseconds(now);
+      std::list<Context*> event_list;
       map_lock.lock();
       for (scheduled_map_t::iterator p = schedule.begin(); p != schedule.end(); p++) {
         if (p->first <= now_l) {
           Context *callback = p->second;
-          callback->complete(0);
+          event_list.emplace_back(callback);
           event_lookup_map_t::iterator event_it = events.find(callback);
           if (event_it != events.end()) {
             events.erase(event_it);
@@ -94,7 +96,13 @@ private:
           schedule.erase(p);
         }
       }
+      map_lock.unlock();
+
+      for (auto &cur_event : event_list) {
+        cur_event->complete(0);
+      }
   
+      map_lock.lock();
       if (schedule.empty()) {
         map_lock.unlock();
         cond.wait(unique_lock);

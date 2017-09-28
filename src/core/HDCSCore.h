@@ -18,6 +18,7 @@ namespace core {
     WorkQueue<void*> request_queue;
     HDCSCore();
     ~HDCSCore();
+    void close();
     void queue_io (Request *req);
     void aio_read (char* data, uint64_t offset, uint64_t length, void* c);
     void aio_write (const char* data, uint64_t offset, uint64_t length, void* c);

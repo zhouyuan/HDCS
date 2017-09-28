@@ -13,6 +13,7 @@ namespace hdcs {
 namespace store {
 
 SimpleBlockStore::SimpleBlockStore(std::string store_path,
+                                   uint64_t total_size,
                                    uint64_t store_size,
                                    uint64_t block_size) :
                                    block_size(block_size),
@@ -20,22 +21,25 @@ SimpleBlockStore::SimpleBlockStore(std::string store_path,
   std::string data_store_path = store_path + ".data"; 
   std::string meta_store_path = store_path + ".meta"; 
 
-  uint64_t block_count = store_size%block_size ?
-                         store_size/block_size+1 :
-                         store_size/block_size;
+  uint64_t meta_block_count = total_size%block_size ?
+                              total_size/block_size+1 :
+                              total_size/block_size;
+  uint64_t data_block_count = store_size%block_size ?
+                              store_size/block_size+1 :
+                              store_size/block_size;
   int ret = open_and_init(data_store_path.c_str(), store_size);
   if (ret < 0) {
     log_print("Datastore init failed with err: %s", std::strerror(ret));
     assert(0);
   }
   data_store_fd = ret;
-  ret = open_and_init(meta_store_path.c_str(), block_count*META_BLOCK_SIZE);
+  ret = open_and_init(meta_store_path.c_str(), meta_block_count*META_BLOCK_SIZE);
   if (ret < 0) {
     log_print("Metastore init failed with err: %s", std::strerror(ret));
     assert(0);
   }
   meta_store_fd = ret;
-  ret = load_mmap((void**)&meta_store_mmap, block_count*META_BLOCK_SIZE, meta_store_fd);
+  ret = load_mmap((void**)&meta_store_mmap, meta_block_count*META_BLOCK_SIZE, meta_store_fd);
   if (ret < 0) {
     log_print("Metastore mmap failed with err: %s", std::strerror(ret));
     assert(0);
