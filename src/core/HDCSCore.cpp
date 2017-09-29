@@ -47,10 +47,10 @@ HDCSCore::HDCSCore() {
 }
 
 HDCSCore::~HDCSCore() {
-  delete policy;
   go = false;
   main_thread->join();
   delete hdcs_op_threads;
+  delete policy;
   delete block_guard;
   delete main_thread;
 }

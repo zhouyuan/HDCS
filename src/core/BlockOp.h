@@ -470,7 +470,7 @@ public:
   void send() {
     log_print("FlushBlockToBackend block: %lu", block->block_id);
     ssize_t ret = 0;
-    if (dirty_flag) {
+    if (dirty_flag != nullptr & *dirty_flag) {
       uint64_t offset = block->block_id * block->block_size;
       ret = data_store->block_read(entry_id, data);
       ret = back_store->write(data, offset, block->block_size);
