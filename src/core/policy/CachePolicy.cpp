@@ -29,6 +29,7 @@ CachePolicy::CachePolicy(uint64_t total_size, uint64_t cache_size, uint32_t bloc
   cache_blocks_count = cache_size / block_size + 1; 
 
   process_blocks_count = 0;
+  flush_all_blocks_count = 0;
 
   for (int32_t i = cache_blocks_count - 1; i >= 0; i--) {
     entries.push_back(Entry(i));
@@ -394,19 +395,23 @@ void CachePolicy::flush_all() {
   }
 
   //queue req to request_queue
-  //process_blocks_count += need_to_flush_count;
+  flush_all_blocks_count += need_to_flush_count;
   Request* req;
   char* data;
   AioCompletion* comp;
   Block* block;
   for (uint64_t i = 0; i < need_to_flush_count; i++) {
-    flush_all_cond.wait(unique_lock, [&]{
-      return process_blocks_count < process_threads_num;
-    });
+    /*flush_all_cond.wait(unique_lock, [&]{
+      return flush_all_blocks_count < process_threads_num;
+    });*/
     // do demote cache one by one
     block = block_list[i];
     comp = new AioCompletionImp([this](ssize_t r){
-      if (--process_blocks_count < process_threads_num) {
+      /*if (--flush_all_blocks_count < process_threads_num) {
+        flush_all_cond.notify_all();
+      }*/
+      if (--flush_all_blocks_count == 0) {
+        log_err("flush_all completed");
         flush_all_cond.notify_all();
       }
     });
@@ -414,8 +419,13 @@ void CachePolicy::flush_all() {
     comp->set_reserved_ptr((void*)data);
     req = new Request(IO_TYPE_FLUSH, data, (block->block_id * block->block_size), block->block_size, comp);
     request_queue->enqueue((void*)req);
-    process_blocks_count++;
+    //flush_all_blocks_count++;
   }
+  uint64_t tmp = flush_all_blocks_count;
+  log_err("Wait %llu blocks to be flushed", tmp);
+  flush_all_cond.wait(unique_lock, [&]{
+    return flush_all_blocks_count == 0;
+  });
   free(block_list);
 }
  

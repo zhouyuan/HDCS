@@ -70,6 +70,7 @@ private:
   std::condition_variable process_thread_cond;
   std::mutex process_thread_cond_lock;
   std::atomic<uint64_t> process_blocks_count;
+  std::atomic<uint64_t> flush_all_blocks_count;
   
   std::condition_variable dirty_flush_cond;
   std::mutex dirty_flush_cond_lock;
