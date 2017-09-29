@@ -22,7 +22,7 @@ HDCSCore::HDCSCore() {
   }
 
   int hdcs_thread_max = stoi(config->configValues["cacheservice_threads_num"]);
-  hdcs_op_threads = new ThreadPool( hdcs_thread_max );
+  hdcs_op_threads = new TWorkQueue( hdcs_thread_max );
   uint64_t total_size = stoull(config->configValues["total_size"]);
   uint64_t block_size = stoull(config->configValues["cache_min_alloc_size"]);
   uint64_t cache_size = stoull(config->configValues["cache_total_size"]);
@@ -111,7 +111,7 @@ void HDCSCore::map_block(BlockRequest &&block_request) {
   }
   block->block_mutex.unlock();
   if (do_process) {
-    hdcs_op_threads->schedule(std::bind(&BlockOp::send, block_ops_head));
+    hdcs_op_threads->add_task(std::bind(&BlockOp::send, block_ops_head));
     //block_ops_head->send();
   }
 }
