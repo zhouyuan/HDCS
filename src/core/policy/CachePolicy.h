@@ -21,10 +21,10 @@ typedef uint8_t CACHE_MODE_TYPE;
 #define CACHE_MODE_READ_ONLY 0XF1
 
 struct Entry {
-  Entry (uint32_t entry_id) : entry_id(entry_id), is_dirty(false), timeout_comp(nullptr) {
+  Entry (uint32_t entry_id) : entry_id(entry_id), status(UNPROMOTED), timeout_comp(nullptr) {
   }
   const uint32_t entry_id;
-  bool is_dirty;
+  store::BLOCK_STATUS_TYPE status;
   AioCompletion* timeout_comp;
 };  
 
@@ -77,11 +77,12 @@ private:
 
   std::condition_variable flush_all_cond;
   std::mutex flush_all_cond_lock;
+  bool last_batch = false;
 
   struct EntryToBlock_t {
     bool valid;
     Block* block;
-    bool dirty_flag;
+    store::BLOCK_STATUS_TYPE status;
     EntryToBlock_t(): valid(false){}
   };
 };

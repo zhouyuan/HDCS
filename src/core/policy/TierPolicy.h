@@ -47,6 +47,7 @@ private:
   std::condition_variable flush_all_cond;
   std::mutex flush_all_cond_lock;
   std::atomic<uint64_t> flush_all_blocks_count;
+  bool last_batch = false;
 };
 }// core
 
