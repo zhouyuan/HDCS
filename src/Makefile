@@ -11,8 +11,8 @@ PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread -lrbd -lrados
 INCS=-I./
 
 DIST_LIB = libhdcs.so
-#POLICY = CACHE
-POLICY = TIER
+POLICY = CACHE
+#POLICY = TIER
 .PHONY : all
 all: $(DIST_LIB)
 

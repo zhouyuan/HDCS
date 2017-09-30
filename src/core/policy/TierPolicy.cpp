@@ -157,10 +157,10 @@ void TierPolicy::flush_all() {
     });
     comp = new AioCompletionImp([this](ssize_t r){
       flush_all_blocks_count--;
-      if (flush_all_blocks_count < process_threads_num) {
+      if ( !last_batch && flush_all_blocks_count < process_threads_num) {
         flush_all_cond.notify_all();
       }
-      if (flush_all_blocks_count == 0) {
+      if ( last_batch && flush_all_blocks_count == 0) {
         log_err("flush_all completed");
         flush_all_cond.notify_all();
       }
@@ -173,6 +173,7 @@ void TierPolicy::flush_all() {
   }
   uint64_t tmp = flush_all_blocks_count;
   log_err("Wait %llu blocks to be flushed", tmp);
+  last_batch = true;
   flush_all_cond.wait(unique_lock, [&]{
     return flush_all_blocks_count == 0;
   });
