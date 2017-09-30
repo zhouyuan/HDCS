@@ -9,13 +9,16 @@
 #include "common/LRU_Linklist.h"
 #include "core/BlockRequest.h"
 #include "core/BlockMap.h"
-#include "store/SimpleStore/SimpleBlockStore.h"
+#include "store/DataStore.h"
 
 namespace hdcs {
 
 namespace core {
 
 #define MAX_BLOCK_ID 1073741824 
+#define UNPROMOTED 0x00
+#define PROMOTED_UNFLUSHED 0x40000000
+#define FLUSHED 0xC0000000
 
 typedef LRU_LIST<void*> LRU_TYPE;
 class Entry;
@@ -284,6 +287,25 @@ public:
   store::DataStore *back_store;
 };
 
+class UpdateTierMeta : public BlockOp{
+public:
+  UpdateTierMeta(store::BLOCK_STATUS_TYPE status_data, store::BLOCK_STATUS_TYPE* status,
+                 store::DataStore* data_store,
+                 Block* block, BlockRequest* block_request, BlockOp* block_op) :
+                 status_data(status_data), status(status),
+                 data_store(data_store), 
+                 BlockOp(block, block_request, block_op) {}
+  void send() {
+    log_print("UpdateTierMeta block: %lu", block->block_id);
+    *status = status_data;
+    data_store->block_meta_update(block->block_id, *status);  
+    complete(0);
+  }
+  store::BLOCK_STATUS_TYPE status_data;
+  store::BLOCK_STATUS_TYPE *status;
+  store::DataStore* data_store;
+};
+
 class UpdateToMeta : public BlockOp{
 public:
   UpdateToMeta(bool* dirty_flag, uint32_t entry_id, store::DataStore* data_store,
@@ -453,7 +475,7 @@ public:
 
 class FlushBlockToBackend : public BlockOp{
 public:
-  FlushBlockToBackend(uint64_t entry_id, bool* dirty_flag,
+  FlushBlockToBackend(uint64_t entry_id, store::BLOCK_STATUS_TYPE* dirty_flag,
                      char* data,
                      store::DataStore* back_store,
                      store::DataStore* data_store,
@@ -462,7 +484,7 @@ public:
                      BlockOp* block_op) :
                      BlockOp(block, block_request, block_op),
                      entry_id(entry_id),
-                     dirty_flag(dirty_flag),
+                     status(dirty_flag),
                      data(data),
                      data_store(data_store),
                      back_store(back_store) {
@@ -470,7 +492,7 @@ public:
   void send() {
     log_print("FlushBlockToBackend block: %lu", block->block_id);
     ssize_t ret = 0;
-    if (dirty_flag != nullptr & *dirty_flag) {
+    if (status != nullptr & *status == PROMOTED_UNFLUSHED) {
       uint64_t offset = block->block_id * block->block_size;
       ret = data_store->block_read(entry_id, data);
       ret = back_store->write(data, offset, block->block_size);
@@ -480,7 +502,7 @@ public:
 private:
   uint64_t entry_id;
   char* data;
-  bool* dirty_flag;
+  store::BLOCK_STATUS_TYPE* status;
   store::DataStore *data_store;
   store::DataStore *back_store;
 };
