@@ -47,3 +47,13 @@ int hdcs_aio_write(hdcs_ioctx_t io, const char* data, uint64_t offset, uint64_t 
   ((hdcs::core::HDCSCore*)io)->aio_write(data, offset, length, arg);
   return 0;
 }
+
+int hdcs_promote_all(hdcs_ioctx_t io) {
+  ((hdcs::core::HDCSCore*)io)->promote_all();
+  return 0;
+}
+
+int hdcs_flush_all(hdcs_ioctx_t io) {
+  ((hdcs::core::HDCSCore*)io)->flush_all();
+  return 0;
+}

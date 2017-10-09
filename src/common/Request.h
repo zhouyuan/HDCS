@@ -15,6 +15,7 @@ typedef uint8_t IO_TYPE;
 #define IO_TYPE_FLUSH   0xF2
 #define IO_TYPE_DISCARD 0xF3
 #define IO_TYPE_DEMOTE_CACHE 0xF4
+#define IO_TYPE_PROMOTE 0xF5
 
   class Request {
   public:

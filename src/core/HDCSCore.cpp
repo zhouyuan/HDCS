@@ -71,7 +71,21 @@ HDCSCore::~HDCSCore() {
 }
 
 void HDCSCore::close() {
+#if defined(CACHE_POLICY)
   policy->flush_all();
+#endif
+}
+
+void HDCSCore::promote_all() {
+#if defined(TIER_POLICY)
+  ((TierPolicy*)policy)->promote_all();
+#endif
+}
+
+void HDCSCore::flush_all() {
+#if defined(TIER_POLICY)
+  ((TierPolicy*)policy)->flush_all();
+#endif
 }
 
 void HDCSCore::queue_io(Request *req) {
