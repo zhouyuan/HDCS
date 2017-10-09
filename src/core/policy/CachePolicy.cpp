@@ -417,6 +417,7 @@ void CachePolicy::flush_all() {
       return flush_all_blocks_count < process_threads_num;    
     });
     block = block_list[i];
+    if (block == 0) continue;
     comp = new AioCompletionImp([this](ssize_t r){
       flush_all_blocks_count--;
       if (!last_batch && flush_all_blocks_count < process_threads_num) {
