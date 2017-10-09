@@ -11,8 +11,8 @@ PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread -lrbd -lrados
 INCS=-I./
 
 DIST_LIB = libhdcs.so
-BENCH = bench
-
+POLICY = CACHE
+#POLICY = TIER
 .PHONY : all
 all: $(DIST_LIB)
 
@@ -22,15 +22,26 @@ all: $(DIST_LIB)
 %.o : %.c
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
-COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/HDCSCore.o 
+COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o 
+
 RBD_OBJECTS:= store/RBD/RBDImageStore.o 
 
-$(BENCH): $(COMMON_OBJECTS) $(RBD_OBJECTS)
-	${CXX} ${CXXFLAGS} ${INCS} bench_libhdcs.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
+HDCSCore_cache.oo : core/HDCSCore.cpp
+	${CXX} -c ${CXXFLAGS} -DCACHE_POLICY ${INCS} $< -o $@
 
-$(DIST_LIB): $(COMMON_OBJECTS) $(RBD_OBJECTS)
+HDCSCore_tier.oo : core/HDCSCore.cpp
+	${CXX} -c ${CXXFLAGS} -DTIER_POLICY ${INCS} $< -o $@
+
+CACHE_CORE_OBJECTS := HDCSCore_cache.oo
+TIER_CORE_OBJECTS := HDCSCore_tier.oo
+
+ifeq ($(POLICY),CACHE)
+$(DIST_LIB): core/policy/CachePolicy.o $(COMMON_OBJECTS) $(RBD_OBJECTS) $(CACHE_CORE_OBJECTS)
 	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
-
+else
+$(DIST_LIB): core/policy/TierPolicy.o $(COMMON_OBJECTS) $(RBD_OBJECTS) $(TIER_CORE_OBJECTS)
+	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
+endif
 clean:
 	rm -rf common/*.o core/*.o store/SimpleStore/*.o store/RBD/*.o core/policy/*.o libhdcs.so
 	rm -rf /usr/local/include/hdcs
