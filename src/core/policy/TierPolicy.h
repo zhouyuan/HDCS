@@ -32,6 +32,7 @@ public:
   ~TierPolicy();
   BlockOp* map(BlockRequest &&block_request, BlockOp** block_op_end);
   void flush_all();
+  void promote_all();
 
 private:
   Entries entries;

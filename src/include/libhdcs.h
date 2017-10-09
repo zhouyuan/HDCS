@@ -19,6 +19,8 @@ int hdcs_open(hdcs_ioctx_t *io);
 int hdcs_close(hdcs_ioctx_t io);
 int hdcs_aio_read(hdcs_ioctx_t io, char* data, uint64_t offset, uint64_t length, hdcs_completion_t c);
 int hdcs_aio_write(hdcs_ioctx_t io, const char* data, uint64_t offset, uint64_t length, hdcs_completion_t c );
+int hdcs_promote_all(hdcs_ioctx_t io);
+int hdcs_flush_all(hdcs_ioctx_t io);
 
 #ifdef __cplusplus
 } //end extern "C"

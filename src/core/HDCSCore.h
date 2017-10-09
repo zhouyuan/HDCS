@@ -19,6 +19,8 @@ namespace core {
     HDCSCore();
     ~HDCSCore();
     void close();
+    void promote_all();
+    void flush_all();
     void queue_io (Request *req);
     void aio_read (char* data, uint64_t offset, uint64_t length, void* c);
     void aio_write (const char* data, uint64_t offset, uint64_t length, void* c);

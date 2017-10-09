@@ -136,6 +136,15 @@ BlockOp* TierPolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) {
                                          back_store, data_store,
                                          block, block_request_ptr, block_op); 
       break;
+    case IO_TYPE_PROMOTE:
+      //promote
+      block_op = new UpdateTierMeta(FLUSHED, &(block->entry->status), data_store,
+                                    block, block_request_ptr, block_op);
+      block_op = new WriteBlockToCache(block_id, block_request_ptr->data_ptr, data_store,
+                                       block, block_request_ptr, block_op); 
+      block_op = new PromoteBlockFromBackend(block_request_ptr->data_ptr, back_store,
+                                             block, block_request_ptr, block_op); 
+      break;
     default:
       block_op = new DoNothing(block, block_request_ptr, block_op); 
       break;
@@ -177,7 +186,42 @@ void TierPolicy::flush_all() {
   flush_all_cond.wait(unique_lock, [&]{
     return flush_all_blocks_count == 0;
   });
+}
 
+void TierPolicy::promote_all() {
+  std::unique_lock<std::mutex> unique_lock(flush_all_cond_lock);
+  //queue req to request_queue
+  Request* req;
+  char* data;
+  AioCompletion* comp;
+  //Block* block;
+  for (uint64_t block_id = 0; block_id < blocks_count; block_id++) {
+    //block = block_map[block_id];
+    flush_all_cond.wait(unique_lock, [&]{
+      return flush_all_blocks_count < process_threads_num;    
+    });
+    comp = new AioCompletionImp([this](ssize_t r){
+      flush_all_blocks_count--;
+      if ( !last_batch && flush_all_blocks_count < process_threads_num) {
+        flush_all_cond.notify_all();
+      }
+      if ( last_batch && flush_all_blocks_count == 0) {
+        log_err("prmote_all completed");
+        flush_all_cond.notify_all();
+      }
+    });
+    posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+    comp->set_reserved_ptr((void*)data);
+    req = new Request(IO_TYPE_PROMOTE, data, (block_id * block_size), block_size, comp);
+    request_queue->enqueue((void*)req);
+    flush_all_blocks_count ++;
+  }
+  uint64_t tmp = flush_all_blocks_count;
+  log_err("Wait %llu blocks to be promoted", tmp);
+  last_batch = true;
+  flush_all_cond.wait(unique_lock, [&]{
+    return flush_all_blocks_count == 0;
+  });
 }
 
 }// core
