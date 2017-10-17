@@ -10,7 +10,6 @@ CCFLAGS=${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSI
 PLATFORM_LDFLAGS=-lrocksdb -lpthread -lboost_thread -lboost_system -lboost_serialization -lrados -lrbd -lrt
 INCS=-I./include  -I../unittest/include/
 
-HTTPHANDLER = http_handler.o
 DIST_LIB = librbc.so
 DIST_PROCESS = librbc_process.so
 MAIN = hyperstash
@@ -24,20 +23,19 @@ all: $(DIST_LIB)
 %.o : %.c
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
-HTTPHANDLER := include/rbc/HttpHandler/HttpRequestHandler.o 
     
 COMMON_OBJECTS:= CacheService.o CacheEntry.o MetaStore.o AgentService.o BackendStore.o SimpleBlockCacher.o
 
 TEST_OBJECTS:= ../unittest/test_common/test_CacheMap.o ../unittest/test_common/test_AllocateMap.o ../unittest/test_common/test_WorkQueue.o ../unittest/test_common/test_MemoryUsageTracker.o
 
-$(MAIN): $(COMMON_OBJECTS) $(HTTPHANDLER)
+$(MAIN): $(COMMON_OBJECTS)
 	cp librbc_process.so librbc.so
 	${CXX} ${CXXFLAGS} ${INCS} main.cpp -o $@ $^ ${PLATFORM_LDFLAGS} librbc.so
 
 $(DIST_PROCESS):
 	${CXX} ${CXXFLAGS} ${INCS} librbc_client.cpp -shared -o $@ $^ ${PLATFORM_LDFLAGS}
 
-$(DIST_LIB): $(COMMON_OBJECTS) $(HTTPHANDLER)
+$(DIST_LIB): $(COMMON_OBJECTS)
 	${CXX} ${CXXFLAGS} ${INCS} librbc.cpp -shared -o $@ $^ ${PLATFORM_LDFLAGS}
 
 process: $(DIST_PROCESS) $(MAIN)
