@@ -72,7 +72,7 @@ int TEST_WORK_QUEUE::push_pop_complex()
     for (int j=0; j<3; j++)
     {
         pop_pointer2 =  request_queue.dequeue();
-        if (pop_pointer2 == (push_pointer2-(3-j)))
+        if (pop_pointer2 == (push_pointer2-(6-j)))
         {
             cout << "pop queue pointer is right" << endl;
         }else
