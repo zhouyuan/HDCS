@@ -119,9 +119,7 @@ private:
 
 
 void server_test1(int thread_count, char const* host, char const* port) {
-    auto endpoint = boost::asio::ip::tcp::endpoint(
-        boost::asio::ip::address::from_string(host), atoi(port));
-    server s(thread_count, endpoint);
+    server s(thread_count, host, port);
     s.start();
     s.wait();
 }

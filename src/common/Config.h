@@ -40,7 +40,11 @@ public:
         {"messenger_port",  "9090"},
         {"slave_messenger_port",  "9091"}
     };
-    Config(std::string name){
+
+    std::vector<std::string> slave_ip_vec;
+    std::vector<std::string> slave_port_vec;
+
+    Config(std::string name, bool if_master=false){
 
         const std::string cfg_file = "general.conf";
         boost::property_tree::ptree pt;
@@ -87,8 +91,8 @@ public:
                 std::stringstream temp;
                 temp<<i;
                 try{
-                    s = pt.get<std::string>( rbd_name + "." + "slave_ip[" + temp.str() + "]");
-                    k = pt.get<std::string>( rbd_name + "." + "slave_messenger_port[" + temp.str() + "]");
+                    s = pt.get<std::string>( name + "." + "slave_ip[" + temp.str() + "]");
+                    k = pt.get<std::string>( name + "." + "slave_messenger_port[" + temp.str() + "]");
                 }catch(...){
                     std::cout<<"when reading ip and port of slave, fails occur."<<std::endl;
                     assert(0);
