@@ -1,0 +1,175 @@
+diff --git a/src/Makefile b/src/Makefile
+index c803db2..d7fc45d 100644
+--- a/src/Makefile
++++ b/src/Makefile
+@@ -12,7 +12,7 @@ PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lboost_program_options -lpthread
+ INCS=-I./ -I../unittest/include
+ CONTROLLER = HDCS
+ DIST_LIB = lib/libhdcs.so
+-TEST_TOOL = hdcs_test_tool
++#TEST_TOOL = hdcs_test_tool
+ POLICY = ALL
+ .PHONY : all
+ all: $(DIST_LIB) $(CONTROLLER) $(TEST_TOOL)
+@@ -30,9 +30,9 @@ RBD_OBJECTS:= store/RBD/RBDImageStore.o
+ $(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS)
+ 	${CXX} ${CXXFLAGS} ${INCS} HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
+ 
+-$(DIST_LIB):
++$(DIST_LIB): $(COMMON_OBJECTS) $(RBD_OBJECTS)
+ 	mkdir -p lib
+-	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
++	${CXX} ${CXXFLAGS} ${INCS} libhdcs.cpp -shared -o $@ $^ ${PLATFORM_LDFLAGS}
+ 
+ $(TEST_TOOL): $(DIST_LIB)
+ 	${CXX} ${CXXFLAGS} ${INCS} test.c -o $@ $^ -Llib -lhdcs
+diff --git a/src/common/C_AioRequestCompletion.h b/src/common/C_AioRequestCompletion.h
+index 5109e69..6527382 100644
+--- a/src/common/C_AioRequestCompletion.h
++++ b/src/common/C_AioRequestCompletion.h
+@@ -8,7 +8,7 @@
+ #include "common/Log.h"
+ 
+ namespace hdcs{
+-typedef void (*callback_t)(void* comp, void *arg);
++typedef void (*callback_t)(size_t ret, void *arg);
+ 
+ class C_AioRequestCompletion : public AioCompletion {
+ private:
+@@ -32,7 +32,7 @@ public:
+     void complete(ssize_t r){
+       ret = r;
+       if (complete_cb) {
+-        complete_cb((void*)this, complete_arg);
++        complete_cb(ret, complete_arg);
+       }
+       completed = true;
+       m_cond.notify_all();
+diff --git a/src/core/HDCSCore.cpp b/src/core/HDCSCore.cpp
+index e7cec3b..acc60c4 100644
+--- a/src/core/HDCSCore.cpp
++++ b/src/core/HDCSCore.cpp
+@@ -76,7 +76,6 @@ HDCSCore::~HDCSCore() {
+   }
+   delete policy;
+   delete block_guard;
+-  main_thread->join();
+   delete main_thread;
+ }
+ 
+diff --git a/src/core/libhdcs.cpp b/src/core/libhdcs.cpp
+deleted file mode 100644
+index dd6593d..0000000
+--- a/src/core/libhdcs.cpp
++++ /dev/null
+@@ -1,4 +0,0 @@
+-// Copyright [2017] <Intel>
+-namespace hdcs {
+-
+-}// hdcs
+diff --git a/src/include/libhdcs.hpp b/src/include/libhdcs.hpp
+index b278b6e..40534d9 100644
+--- a/src/include/libhdcs.hpp
++++ b/src/include/libhdcs.hpp
+@@ -1,5 +1,6 @@
+ //Copyright [2017] <Intel>
+ #include <stdint.h>
++#include <cstddef>
+ 
+ #ifndef LIB_HDCS_H
+ #define LIB_HDCS_H
+@@ -10,19 +11,19 @@ namespace hdcs {
+   }
+ }
+ 
+-typedef void (*callback_t)(int r, void *arg);
++typedef void (*callback_t)(size_t r, void *arg);
+ typedef void* hdcs_completion_t;
+ 
+-static void hdcs_aio_release(hdcs_completion_t c);
+-static int hdcs_aio_create_completion(void *cb_arg, callback_t complete_cb, hdcs_completion_t *c);
++void hdcs_aio_release(hdcs_completion_t c);
++int hdcs_aio_create_completion(void *cb_arg, callback_t complete_cb, hdcs_completion_t *c);
+ 
+ class libhdcs {
+ public:
+-  libhdcs();
++  libhdcs(const char* name);
+   ~libhdcs();
+-  int hdcs_aio_read(char* data, uint64_t offset, uint64_t length, hdcs_completion_t c);
+-  int hdcs_aio_write( const char* data, uint64_t offset, uint64_t length, hdcs_completion_t c );
++  int hdcs_aio_read(const char* volume_name, char* data, uint64_t offset, uint64_t length, hdcs_completion_t c);
++  int hdcs_aio_write(const char* volume_name, const char* data, uint64_t offset, uint64_t length, hdcs_completion_t c);
+ private:
+   hdcs::core::HDCSCore* hdcs_inst;
+-}; 
++};
+ #endif
+diff --git a/src/libhdcs.cpp b/src/libhdcs.cpp
+index 5aa3f45..f3ba496 100644
+--- a/src/libhdcs.cpp
++++ b/src/libhdcs.cpp
+@@ -1,7 +1,8 @@
+ // Copyright [2017] <Intel>
+-#include "include/libhdcs.h"
++#include "include/libhdcs.hpp"
+ #include "common/C_AioRequestCompletion.h"
+ #include "common/Request.h"
++#include "common/Config.h"
+ #include "core/HDCSCore.h"
+ 
+ using namespace hdcs;
+@@ -17,24 +18,32 @@ int hdcs_aio_create_completion(void *cb_arg, callback_t complete_cb, hdcs_comple
+   return 0;
+ }
+ 
+-libhdcs::libhdcs() {
+-  hdcs_inst = new core::HDCSCore();
++libhdcs::libhdcs(const char* name) {
++  //TODO(): repl_opt should be ignored
++  hdcs_repl_options repl_opt("master", "aaa"); 
++  hdcs_inst = new core::HDCSCore(name, "/etc/hdcs/general.conf", repl_opt);
+ }
+ 
+ libhdcs::~libhdcs() {
+   delete hdcs_inst;
+ }
+ 
+-int libhdcs::hdcs_aio_read(char* data, uint64_t offset, uint64_t length, hdcs_completion_t c){
++int libhdcs::hdcs_aio_read(const char* volume_name, char* data, uint64_t offset, uint64_t length, hdcs_completion_t c){
+   void* arg = (void*)c;
+-  Request *req = new Request(IO_TYPE_READ, data, offset, length, arg);
+-  hdcs_inst->queue_io(req);
++  //Request *req = new Request(IO_TYPE_READ, data, offset, length, arg);
++  //hdcs_inst->queue_io(req);
++  hdcs_inst->aio_read(data, offset, length, arg);
+   return 0;
+ }
+ 
+-int libhdcs::hdcs_aio_write( const char* data, uint64_t offset, uint64_t length, hdcs_completion_t c ){
++int libhdcs::hdcs_aio_write(const char* volume_name, const char* data, uint64_t offset, uint64_t length, hdcs_completion_t c){
++   /* AioCompletion* comp = (AioCompletion*) c;
++    comp->complete(0);
++    return 0;*/
++  //void* arg = (void*)c;
++  //Request *req = new Request(IO_TYPE_WRITE, const_cast<char*>(data), offset, length, arg);
++  //hdcs_inst->queue_io(req);
+   void* arg = (void*)c;
+-  Request *req = new Request(IO_TYPE_WRITE, const_cast<char*>(data), offset, length, arg);
+-  hdcs_inst->queue_io(req);
++  hdcs_inst->aio_write((char*)data, offset, length, arg);
+   return 0;
+ }
+diff --git a/src/store/RBD/RBDImageStore.cpp b/src/store/RBD/RBDImageStore.cpp
+index aab820e..b1a070b 100644
+--- a/src/store/RBD/RBDImageStore.cpp
++++ b/src/store/RBD/RBDImageStore.cpp
+@@ -43,7 +43,7 @@ RBDImageStore::RBDImageStore(std::string pool_name,
+     goto failed_shutdown;
+   }
+ 
+-  r = rbd_open(io_ctx, volume_name.c_str(), &image_ctx, NULL /*snap */ );
++  r = rbd_open_skip_cache(io_ctx, volume_name.c_str(), &image_ctx, NULL /*snap */ );
+   if (r < 0) {
+     log_err("rbd_open failed.\n");
+     goto failed_open;

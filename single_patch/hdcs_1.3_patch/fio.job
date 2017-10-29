@@ -1,0 +1,17 @@
+[global]
+    direct=1
+    time_based
+[fiorbd-randwrite-4k-qd64-10g-100-100-rbd]
+    rw=randwrite
+    bs=4k
+    iodepth=64
+    ramp_time=100
+    runtime=100
+    ioengine=rbd
+    clientname=admin
+    pool=rbd
+    rbdname=ssdcache-volume-0578c5a8-aedf-4a55-973d-268db0021999
+    iodepth_batch_submit=1
+    iodepth_batch_complete=1
+    norandommap
+    randrepeat=0
