@@ -1,3 +1,8 @@
+HDCS 1.2.0 (2017-10-29)
+----------------------
+1. implment threadpool with std::thread
+2. improve networking IO model
+
 HDCS 1.1.0 (2017-08-06)
 ----------------------
 1. Supporting master/slave replication
