@@ -79,23 +79,6 @@ public:
             s = "";
         }
 
-        // accoding to replication_num, load ip and port of slave from config file.
-        if(if_master){
-            int replica_num=std::stoi(configValues["replication_num"]);
-            for( int i=0; i<replica_num-1; i++ ){
-                std::stringstream temp;
-                temp<<i;
-                try{
-                    s = pt.get<std::string>( rbd_name + "." + "slave_ip[" + temp.str() + "]");
-                    k = pt.get<std::string>( rbd_name + "." + "slave_messenger_port[" + temp.str() + "]");
-                }catch(...){
-                    std::cout<<"when reading ip and port of slave, fails occur."<<std::endl;
-                    assert(0);
-                }
-                slave_ip_vec.push_back(s);
-                slave_port_vec.push_back(k);
-            }
-        }
         boost::property_tree::ini_parser::write_ini(cfg_file, pt);
 
         configValues["cache_dir_dev"] = configValues["cache_dir"] + "/" + name + "_cache.data";
