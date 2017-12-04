@@ -209,7 +209,7 @@ void HDCSCore::connect_to_replica (std::string name) {
 
     io_ctx = (hdcs_ioctx_t*)malloc(sizeof(hdcs_ioctx_t));
     replication_core_map[addr_port_str] = (void*)io_ctx;
-    io_ctx->conn = new Connection([](void* p, std::string s){client::request_handler(p, s);});
+    io_ctx->conn = new hdcs::networking::Connection([](void* p, std::string s){client::request_handler(p, s);}, 16, 5);
     io_ctx->conn->connect(addr, port);
     io_ctx->conn->set_session_arg((void*)io_ctx);
 

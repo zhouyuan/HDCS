@@ -2,7 +2,8 @@
 #ifndef HDCS_REQUEST_HANDLER_H
 #define HDCS_REQUEST_HANDLER_H
 
-#include "Network/client.h"
+//#include "Network/client.h"
+#include "../Network_2/hdcs_networking.h"
 #include "common/HDCS_REQUEST_CTX.h"
 
 namespace client {

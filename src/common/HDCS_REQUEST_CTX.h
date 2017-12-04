@@ -7,11 +7,12 @@
 #include <stdlib.h>
 #include <string.h>
 #include "common/C_AioRequestCompletion.h"
+#include "Network_2/hdcs_networking.h"
 
 class Connection;
 
 struct hdcs_ioctx_t{
-  Connection* conn;
+  hdcs::networking::Connection* conn;
   void* hdcs_inst; 
   std::atomic<void*> comp;
 };
