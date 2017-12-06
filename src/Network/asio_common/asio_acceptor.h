@@ -87,7 +87,7 @@ private:
         if (is_closed.load()){
             return;
         }
-        std::cout<<"Networking: New session have been created, and session ID is: "<<new_session_ptr<<std::endl;
+        //std::cout<<"Networking: New session have been created, and session ID is: "<<new_session_ptr<<std::endl;
 
         if (ec){
             std::cout<< "start_listen(): async_acceptor failed: "<<ec.message()<<std::endl;

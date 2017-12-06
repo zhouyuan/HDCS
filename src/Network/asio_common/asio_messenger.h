@@ -8,6 +8,7 @@
 #include <mutex>
 #include <thread>
 #include <pthread.h>
+#include <atomic>
 #include "../common/Message.h"
 #include "../common/aio_complete.h"
 #include "../common/networking_common.h"
@@ -33,6 +34,8 @@ private:
     std::mutex receive_lock;
     ProcessMsgClient c_process_msg;
     ProcessMsg s_process_msg;
+    std::atomic<bool> async_receive_loop;
+    std::mutex async_receive_loop_mutex;
     //ThreadGroup thread_worker;
 
 public:
@@ -44,6 +47,7 @@ public:
         , msg_header(new char[sizeof(MsgHeader)])
         , resolver_(ios)
         , role(_role) // 0 is client, and 1 is server
+        , async_receive_loop(false)
         //, thread_worker(5)
     {
 
@@ -138,6 +142,7 @@ public:
         is_closed = false; 
         c_process_msg = _process_msg; 
         aio_receive();
+        async_receive_loop.store(true);
         return 0;
     }
 
@@ -162,9 +167,6 @@ public:
             std::cout<<"asio_messenger::sync_send failed: ret != send_bytes "<<std::endl;
             assert(0);
         }
-#ifdef INFO
-	std::cout<<"sync_send success.."<<std::endl;
-#endif
         return 0;
     }
 
@@ -180,9 +182,6 @@ public:
                         std::cout<<"asio_session::aync_send failed: ret != cb"<<std::endl;
                         assert(0);
                     }
-#ifdef INFO
- 	            std::cout<<"async_send success.."<<std::endl;
-#endif
                 }else{
                     std::cout<<"asio_session::aync_send failed: "<<ec.message()<<std::endl;
                 }
@@ -195,6 +194,7 @@ public:
         boost::system::error_code ec;
         uint64_t ret;
         char msg_header[header_len];
+        receive_lock.lock();//
         ret = boost::asio::read(socket_, boost::asio::buffer(msg_header, header_len), ec); 
         if(ret<0){
             std::cout<<"asio_session::sync_receive msg_header failed:  "<<ec.message()<<std::endl;
@@ -207,6 +207,7 @@ public:
         uint64_t content_size = ((MsgHeader*)msg_header)->get_data_size();
         char* receive_buffer = new char[content_size+1]();
         ret = boost::asio::read(socket_, boost::asio::buffer(receive_buffer, content_size), ec); 
+        receive_lock.unlock();// 
         if(ret<0){
             std::cout<<"asio_session::sync_receive content failed: "<<ec.message()<<std::endl;
             delete[] receive_buffer;
@@ -224,13 +225,26 @@ public:
             return -1;
         }
         c_process_msg(callback_arg, std::move(std::string(receive_buffer, content_size)));
+	//thread_worker.post(boost::bind(c_process_msg, callback_arg, std::move(std::string(data_buffer,content_size))));
         delete[] receive_buffer;
         return 0;
    }
 
     // called by client. 
+    /* Default situation: async loop receive.
+     * When using sync communicate, firstly replace one sync_receive with  async_receive_loop
+     * When communicate have been done, start up aync_receive.
+     * Due to ping-pong needs at least 0.02ms, so these code don't influence performance.
+     */
     ssize_t communicate(std::string send_buffer){
         sync_send(send_buffer);
+        if(async_receive_loop.load()){
+            cancel();
+            async_receive_loop.store(false);
+        }
+        sync_receive();
+        aio_receive();
+        async_receive_loop.store(true);
         return 0;
     }
     
@@ -254,6 +268,12 @@ public:
                     std::cout<<"asio_session::aync_send failed: "<<ec.message()<<std::endl;
                 }
             });
+    /*
+        if(!async_receive_loop.load()){
+            async_receive_loop.store(true);
+            aio_receive();
+        }
+    */
     }
 
     // called by client.
@@ -282,12 +302,12 @@ public:
 				c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
 				//thread_worker.post(boost::bind(c_process_msg, callback_arg, std::move(std::string(data_buffer,content_size))));
                             }else{ 
-                                std::cout << "asio_messenger::async_receive: secondly async_read failed: " << err.message() << std::endl;
+                                //std::cout << "asio_messenger::async_receive: secondly async_read failed: " << err.message() << std::endl;
                             }
  			    delete[] data_buffer;
                         });
                }else{ 
-                   std::cout << "asio_messenger::async_receive: firstly async_read failed: " << err.message() << std::endl;
+                   //std::cout << "asio_messenger::async_receive: firstly async_read failed: " << err.message() << std::endl;
               }
         });
     }
@@ -321,16 +341,15 @@ public:
 				s_process_msg(arg, std::move(std::string(data_buffer,content_size)));
 				//thread_worker.post(boost::bind(s_process_msg, arg, std::move(std::string(data_buffer,content_size))));
                             }else{ 
-                                std::cout << "asio_messenger::async_receive: secondly async_read failed: " << err.message() << std::endl;
+                                //std::cout << "asio_messenger::async_receive: secondly async_read failed: " << err.message() << std::endl;
                             }
  			    delete[] data_buffer;
                         });
                }else{ 
-                   std::cout << "asio_messenger::async_receive: firstly async_read failed: " << err.message() << std::endl;
+                   //std::cout << "asio_messenger::async_receive: firstly async_read failed: " << err.message() << std::endl;
               }
         });
     }
-
 };
 
 }
