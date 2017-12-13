@@ -11,6 +11,9 @@ mkdir -p $DEPS_SRC_DIR
 mkdir -p $DEPS_UT_SRC_DIR
 mkdir -p $DEPS_UT_LIB_DIR
 
+git clone https://github.com/intel-bigdata/hlkvds.git
+cd hlkvds; git checkout v1.0.0; make && make install
+
 
 . /etc/os-release
 

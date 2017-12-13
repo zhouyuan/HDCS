@@ -8,7 +8,7 @@ OPT=$(OPTIMIZATION)
 CXXFLAGS=-std=c++11 ${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 CCFLAGS=${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 #PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread -lrbd -lrados
-PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lboost_program_options -lpthread
+PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lboost_program_options -lpthread -lhlkvds
 INCS=-I./ -I../unittest/include
 CONTROLLER = HDCS
 DIST_LIB = lib/libhdcs.so
@@ -23,9 +23,8 @@ all: $(DIST_LIB) $(CONTROLLER) $(TEST_TOOL)
 %.o : %.c
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
-COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o HDCSController.o
+COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o HDCSController.o store/KVStore/KVStore.o store/DataStore.o
 LIB_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o
-
 RBD_OBJECTS:= store/RBD/RBDImageStore.o 
 
 $(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS)

@@ -4,6 +4,8 @@
 #include "core/policy/CachePolicy.h"
 #include "core/policy/TierPolicy.h"
 #include "store/SimpleStore/SimpleBlockStore.h"
+#include "store/KVStore/KVStore.h"
+#include "store/DataStore.h"
 #include "store/RBD/RBDImageStore.h"
 #include "common/HDCS_REQUEST_HANDLER.h"
 
@@ -30,6 +32,7 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
   uint64_t block_size = stoull(config->configValues["cache_min_alloc_size"]);
   bool cache_policy_mode = config->configValues["policy_mode"].compare(std::string("cache")) == 0 ? true : false;
 
+  std::string engine_type = config->configValues["entine_type"];
   std::string path = config->configValues["cache_dir_run"];
   std::string pool_name = config->configValues["rbd_pool_name"];
   std::string volume_name = name;
@@ -43,6 +46,7 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
                                replication_core_map.size(),
                                std::move(replication_core_map));
   BlockMap* block_ptr_map = block_guard->get_block_map();
+  store::DataStore* datastore = nullptr;
 
   if (cache_policy_mode) {
     uint64_t cache_size = stoull(config->configValues["cache_total_size"]);
@@ -50,13 +54,13 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
     uint64_t timeout_nanosecond = stoull(config->configValues["cache_dirty_timeout_nanoseconds"]);
     CACHE_MODE_TYPE cache_mode = config->configValues["cache_mode"].compare(std::string("readonly")) == 0 ? CACHE_MODE_READ_ONLY : CACHE_MODE_WRITE_BACK;
     policy = new CachePolicy(total_size, cache_size, block_size, block_ptr_map,
-                      new store::SimpleBlockStore(path, total_size, cache_size, block_size),
+                      datastore->create_engine(engine_type, path, total_size, cache_size, block_size),
                       new store::RBDImageStore(pool_name, volume_name, block_size),
                       cache_ratio_health, &request_queue,
                       timeout_nanosecond, cache_mode, hdcs_thread_max);
   } else {
     policy = new TierPolicy(total_size, block_size, block_ptr_map,
-                    new store::SimpleBlockStore(path, total_size, total_size, block_size),
+                    datastore->create_engine(engine_type, path, total_size, total_size, block_size),
                     new store::RBDImageStore(pool_name, volume_name, block_size),
                     &request_queue, hdcs_thread_max);
   }

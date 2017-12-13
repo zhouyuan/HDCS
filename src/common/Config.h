@@ -43,6 +43,7 @@ public:
         {"cache_dirty_timeout_nanoseconds", "10000000000"},
         {"cache_min_alloc_size","4096"},
         {"op_threads_num","64"},
+        {"engine_type","simple"},
     };
     Config(std::string name, struct hdcs_repl_options replication_options, std::string config_name="/etc/hdcs/general.conf"){
 
