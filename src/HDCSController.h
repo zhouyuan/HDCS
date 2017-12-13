@@ -3,8 +3,7 @@
 #define HDCS_CONTROLLER_H
 
 #include "common/Config.h"
-//#include "Network/server.h"
-#include "Network_2/hdcs_networking.h"
+#include "Network/hdcs_networking.h"
 #include "core/HDCSCore.h"
 #include "common/HDCS_REQUEST_CTX.h"
 

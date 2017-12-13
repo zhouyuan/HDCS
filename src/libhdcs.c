@@ -35,7 +35,6 @@ int hdcs_open(void** io, char* name) {
   io_ctx->conn->set_session_arg(*io);
 
   io_ctx->conn->communicate(std::move(std::string(msg_content.data(), msg_content.size())));
-  sleep(1);
   return 0;
 }
 

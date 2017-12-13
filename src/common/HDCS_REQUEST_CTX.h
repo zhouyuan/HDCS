@@ -7,7 +7,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "common/C_AioRequestCompletion.h"
-#include "Network_2/hdcs_networking.h"
+#include "Network/hdcs_networking.h"
 
 class Connection;
 
