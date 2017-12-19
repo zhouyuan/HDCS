@@ -8,9 +8,16 @@
 #include "common/HDCS_REQUEST_CTX.h"
 
 namespace hdcs {
+
+  struct hdcs_repl_options {
+    hdcs_repl_options(std::string role, std::string replication_nodes): role(role), replication_nodes(replication_nodes){};
+    std::string role;
+    std::string replication_nodes;
+  };
+
   class HDCSController {
   public:
-    HDCSController(std::string name, std::string config_name);
+    HDCSController(struct hdcs_repl_options repl_opt, std::string config_name);
     ~HDCSController();
     void handle_request(void* session_id, std::string msg_content);
   private:

@@ -35,13 +35,9 @@ public:
         {"cache_dirty_timeout_nanoseconds", "10000000000"},
         {"cache_min_alloc_size","4096"},
         {"op_threads_num","64"},
-        {"local_port","9000"},
-        {"role","hdcs_replica"},
-        {"replication_nodes",  "192.168.3.100:9090, 192.168.3.100:9091"},
     };
-    Config(std::string name, std::string config_name="general.conf"){
+    Config(std::string name, std::string myrole="slave", std::string replication_nodes="192.168.1.1:9091", std::string config_name="general.conf"){
 
-      std::cout << "config_file path: " << config_name << std::endl;
         const std::string cfg_file = config_name;
         boost::property_tree::ptree pt;
         try {
@@ -54,33 +50,35 @@ public:
         }
 
         std::string s;
-        std::string k;
+        //scan global section, overwrite default config
         for (ConfigInfo::const_iterator it = configValues.begin(); it!=configValues.end(); it++) {
             try {
-                s = pt.get<std::string>(name + "." + it->first);
-            } catch(...) {
-                try {
-                    s = pt.get<std::string>("global." + it->first);
-                } catch(...) {
-                    continue;
-                }
-                if ((it->first == "log_to_file")&&(s != "false")) {
-                    pt.put(name + "." + it->first, s + "_" + name + ".log");
-                    s = s + "_" + name + ".log";
-                } else {
-                    pt.put(name + "." + it->first, s);
-                }
-            }
-            if (s == "") {
                 s = pt.get<std::string>("global." + it->first);
-                pt.put(name + "." + it->first, s);
+            } catch(...) {
+                continue;
             }
-            configValues[it->first] = s;
+            if (s != "") {
+                configValues[it->first] = s;
+            }
             s = "";
         }
 
-        boost::property_tree::ini_parser::write_ini(cfg_file, pt);
+        if (name == "") {
+          //FIXME(): rbd with blank name?
+          // accept role from cmdline
+          // if role is not master/slave, then assert
+          if ("master" == myrole) {
+            configValues["role"] = "hdcs_master";
+            configValues["replication_nodes"] = replication_nodes;
+          } else if ("slave" == myrole) {
+            configValues["role"] = "hdcs_replca";
+            configValues["replication_nodes"] = "";
+          } else {
+            assert(0);
+          }
 
+        }
+        configValues["rbd_volume_name"] = name;
         configValues["cache_dir_dev"] = configValues["cache_dir"] + "/" + name + "_cache.data";
         configValues["cache_dir_meta"] = configValues["cache_dir"] + "/" + name + "_meta";
         configValues["cache_dir_run"] = configValues["cache_dir"] + "/" + name + "_run";

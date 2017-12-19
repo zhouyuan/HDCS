@@ -8,7 +8,7 @@ OPT=$(OPTIMIZATION)
 CXXFLAGS=-std=c++11 ${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 CCFLAGS=${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 #PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread -lrbd -lrados
-PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread
+PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lboost_program_options -lpthread
 INCS=-I./
 CONTROLLER = HDCS
 DIST_LIB = lib/libhdcs.so

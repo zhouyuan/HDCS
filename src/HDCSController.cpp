@@ -2,8 +2,8 @@
 #include "HDCSController.h"
 
 namespace hdcs {
-HDCSController::HDCSController(std::string name, std::string config_name): config_name(config_name) {
-  config = new Config(name, config_name); 
+HDCSController::HDCSController(struct hdcs_repl_options repl_opt, std::string config_name): config_name(config_name) {
+  config = new Config("", repl_opt.role, repl_opt.replication_nodes, config_name);
   std::string log_path = config->configValues["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
   if( log_path!="false" ){
@@ -12,8 +12,14 @@ HDCSController::HDCSController(std::string name, std::string config_name): confi
 	  if(log_fd==NULL){}
     if(-1==dup2(fileno(log_fd), STDERR_FILENO)){}
   }
-  //network_service = new server(16, "0.0.0.0", config->configValues["local_port"]);
-  network_service = new networking::server("0.0.0.0", config->configValues["local_port"], 16, 5);
+
+  std::string _port = "9000";
+  if ("hdcs_replica" == config->configValues["role"]) {
+    _port = "9001";
+  }
+
+  //TODO(): seperate public/cluster network
+  network_service = new networking::server("0.0.0.0", _port, 16, 5);
   network_service->start([&](void* p, std::string s){handle_request(p, s);});
   //network_service->wait();
   network_service->run();
@@ -39,7 +45,7 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
       hdcs_core_map_mutex.lock();
       auto it = hdcs_core_map.find(name);
       if (it == hdcs_core_map.end()) {
-        core::HDCSCore* core_inst = new core::HDCSCore(name, config_name);
+        core::HDCSCore* core_inst = new core::HDCSCore(name, config->configValues["role"], config->configValues["replication_nodes"]);
         auto ret = hdcs_core_map.insert(std::pair<std::string, core::HDCSCore*>(name, core_inst));
         assert (ret.second);
         it = ret.first;
