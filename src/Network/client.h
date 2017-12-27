@@ -9,6 +9,7 @@
 #include <memory>
 #include <atomic>
 #include "connect.h"
+#include "common/counter.h"
 //#include "../io_service/thread_group.h"
 
 namespace hdcs{
@@ -23,20 +24,17 @@ private:
     ProcessMsgClient process_msg;
     void* process_msg_arg;
     int session_num;
-    std::mutex receive_lock;
-    bool is_begin_aio;
-    std::mutex send_lock;
-//    ThreadGroup thread_pool;
+    std::mutex session_index_lock;
+    AtomicCounter64 _next_sequence_id; // free lock counter
 public:
 
     Connection( ProcessMsgClient _process_msg , int _s_num, int _thd_num)
         : session_index(0)
         , session_num(_s_num)
         , process_msg(_process_msg)
-        , is_begin_aio(false)
         , m_connect(_s_num, _thd_num)
+        , _next_sequence_id(0)
         , is_closed(true)
-       // , thread_pool(10)
     {}
 
     ~Connection(){
@@ -57,7 +55,6 @@ public:
         for(int i = 0; i < session_vec.size(); ++i){
             session_vec[i]->cancel();
         }
-        sleep(1);
     }
     
     void set_session_arg(void* arg){
@@ -87,47 +84,33 @@ public:
     }
 
     ssize_t communicate( std::string send_buffer){
-        send_lock.lock();
-        int temp_index = session_index;
+        int temp_index;
+        session_index_lock.lock();
+        temp_index = session_index;
         if(++session_index==session_vec.size()){
             session_index = 0;
         }
-        send_lock.unlock();
-#ifdef INFO
-        std::cout<<"client::communicate."<<std::endl;
-#endif
-        ssize_t ret = session_vec[temp_index]->communicate(send_buffer);
+        session_index_lock.unlock();
+        ssize_t ret = session_vec[temp_index]->communicate(send_buffer, generate_sequence_id());
         return ret;
     }
 
     void aio_communicate(std::string&& send_buffer){
         int temp_index; 
-        send_lock.lock();
+        session_index_lock.lock();
         temp_index = session_index;
         if(++session_index==session_vec.size()){
             session_index = 0;
         }
-        send_lock.unlock();
-#ifdef INFO
-        std::cout<<"client::aio_communicate."<<std::endl;
-#endif
-        session_vec[temp_index]->aio_communicate( send_buffer );
+        session_index_lock.unlock();
+        session_vec[temp_index]->aio_communicate( send_buffer, generate_sequence_id() );
     }
 
 private:
 
-    Session* select_idle_session(){
-        while(true){
-            for( int i = 0; i<session_vec.size(); i++){
-                if(!(session_vec[i]->if_busy())){
-                    std::cout<<"select session id is "<<i<<std::endl;
-                    session_vec[i]->set_busy();
-                    return session_vec[i];
-                }
-            }
-        }
+    uint64_t generate_sequence_id(){
+        return ++_next_sequence_id;
     }
-
 };
 } //hdcs
 }

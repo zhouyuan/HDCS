@@ -2,6 +2,7 @@
 #define HDCS_NETWORKING
 //#define INFO
 #include "./common/Message.h"
+//#include "./common/log.h"
 #include "./common/networking_common.h"
 #include "./asio_common/asio_messenger.h"
 #include "./asio_common/asio_session.h"

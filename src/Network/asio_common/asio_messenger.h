@@ -1,5 +1,6 @@
 #ifndef ASIO_MESSENGER
 #define ASIO_MESSENGER
+
 #include <boost/bind.hpp>
 #include <boost/asio.hpp>
 #include <condition_variable>
@@ -9,13 +10,43 @@
 #include <thread>
 #include <pthread.h>
 #include <atomic>
+
 #include "../common/Message.h"
-#include "../common/aio_complete.h"
 #include "../common/networking_common.h"
 #include "../io_service/thread_group.h"
+#include "../common/wait_event.h"
+//#include "asio_session.h"
+
 namespace hdcs{
 namespace networking{
 using boost::asio::ip::tcp;
+
+class SessionArg{
+public:
+    SessionArg(const void* s_id, uint64_t _seq)
+        :session_id(s_id),seq_id(_seq)
+    {}
+    SessionArg(const void* s_id)
+        :session_id(s_id)
+    {}
+    ~SessionArg(){}
+
+    void set_seq_id(uint64_t _seq_id){
+        seq_id = _seq_id;
+    }
+
+    uint64_t get_seq_id(){
+        return seq_id;
+    }
+
+    const void* get_session_id(){
+        return session_id;
+    }        
+
+private:
+    const void* session_id;
+    uint64_t seq_id;
+};
 
 class asio_messenger{
 private:
@@ -36,7 +67,8 @@ private:
     ProcessMsg s_process_msg;
     std::atomic<bool> async_receive_loop;
     std::mutex async_receive_loop_mutex;
-    //ThreadGroup thread_worker;
+    std::map<uint64_t,MsgController*> pending_msg_map; 
+    //ThreadGroup thread_worker; // post hdcs_handle_request into other io_service.
 
 public:
     asio_messenger( IOService& ios, int _role)
@@ -75,20 +107,20 @@ public:
             std::cout<<"asio_messenger::set_socket_option failed: "<<ec.message()<<std::endl;
             assert(0);
         }
-/*
-        boost::asio::socket_base::send_buffer_size s_b(65535);
+        // 128k + header 
+        boost::asio::socket_base::send_buffer_size s_b(140000);
         socket_.set_option(s_b, ec);
         if(ec){
             std::cout<<"asio_messenger::set_socket_option: send_buffer_size failed "<<ec.message()<<std::endl;
             assert(0);
         }
-        boost::asio::socket_base::receive_buffer_size r_b(65535);
+        boost::asio::socket_base::receive_buffer_size r_b(140000);
         socket_.set_option(r_b, ec);
         if(ec){
             std::cout<<"asio_messenger::set_socket_option: receive_buffer_size failed "<<ec.message()<<std::endl;
             assert(0);
         }
-*/
+
         return 0;
     }
 
@@ -146,15 +178,16 @@ public:
         return 0;
     }
 
+    // TODO
     int async_connection(){
         return 0;
     }
 
     //called by client.
-    int sync_send( std::string send_buffer) {
+    int sync_send( std::string send_buffer, uint64_t _seq_id) {
         boost::system::error_code ec;
         uint64_t ret;
-        Message msg(send_buffer); 
+        Message msg(send_buffer, _seq_id); 
         uint64_t send_bytes = msg.to_buffer().size();
         send_lock.lock();
         ret=boost::asio::write(socket_, boost::asio::buffer(std::move(msg.to_buffer())), ec);
@@ -167,12 +200,16 @@ public:
             std::cout<<"asio_messenger::sync_send failed: ret != send_bytes "<<std::endl;
             assert(0);
         }
+        MsgController* msg_cntl = new MsgController(true); // ture express this msg is sync
+        pending_msg_map[_seq_id]=msg_cntl;
+        msg_cntl->wait(); // waitting until its ack signal. 
+
         return 0;
     }
 
     // called by server.
-    int async_send(std::string& send_buffer) {
-        std::string* send_string = new std::string( Message(send_buffer).to_buffer());
+    int async_send(std::string& send_buffer, uint64_t _seq_id) {
+        std::string* send_string = new std::string( Message(send_buffer, _seq_id).to_buffer());
         uint64_t ret = send_string->size();
         boost::asio::async_write(socket_, boost::asio::buffer(*send_string, ret),
             [this, ret, send_string](  
@@ -189,7 +226,7 @@ public:
             });
     }
 
-    // call by client.
+    // call by client---disbale
     ssize_t sync_receive(){
         boost::system::error_code ec;
         uint64_t ret;
@@ -230,27 +267,14 @@ public:
         return 0;
    }
 
-    // called by client. 
-    /* Default situation: async loop receive.
-     * When using sync communicate, firstly replace one sync_receive with  async_receive_loop
-     * When communicate have been done, start up aync_receive.
-     * Due to ping-pong needs at least 0.02ms, so these code don't influence performance.
-     */
-    ssize_t communicate(std::string send_buffer){
-        sync_send(send_buffer);
-        if(async_receive_loop.load()){
-            cancel();
-            async_receive_loop.store(false);
-        }
-        sync_receive();
-        aio_receive();
-        async_receive_loop.store(true);
+    ssize_t communicate(std::string send_buffer, uint64_t _seq_id){
+        sync_send(send_buffer, _seq_id);
         return 0;
     }
     
     // called by client.
-    void aio_communicate(std::string& send_buffer){
-        Message msg(send_buffer);
+    void aio_communicate(std::string& send_buffer, uint64_t _seq_id){
+        Message msg(send_buffer, _seq_id);
         std::string send_string(std::move(msg.to_buffer()));
         uint64_t ret = send_string.size();
         send_lock.lock();
@@ -268,12 +292,6 @@ public:
                     std::cout<<"asio_session::aync_send failed: "<<ec.message()<<std::endl;
                 }
             });
-    /*
-        if(!async_receive_loop.load()){
-            async_receive_loop.store(true);
-            aio_receive();
-        }
-    */
     }
 
     // called by client.
@@ -287,8 +305,9 @@ public:
                     }
                     uint64_t content_size = ((MsgHeader*)msg_header)->get_data_size();
                     char* data_buffer = new char[content_size+1]();
+                    uint64_t sequence_id = ((MsgHeader*)msg_header)->get_seq_id(); 
                     boost::asio::async_read( socket_, boost::asio::buffer(data_buffer, content_size ), boost::asio::transfer_exactly(content_size),
-                        [this, data_buffer, content_size]( const boost::system::error_code& err, uint64_t cb ){
+                        [this, data_buffer, content_size, sequence_id]( const boost::system::error_code& err, uint64_t cb ){
                             if(!err){
                                 if( content_size != cb ){
                                     std::cout<<"asio_messenger::async_receive, firstly async_read failed: cb != header_len" << std::endl;
@@ -299,24 +318,30 @@ public:
                                     assert(0);
                                 }
                                 aio_receive();
+				//c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
+                                if(pending_msg_map.size()!=0){
+                                    // lock? TODO
+                                    pending_msg_map[sequence_id]->Done();
+                                    delete pending_msg_map[sequence_id];
+                                    pending_msg_map.erase(sequence_id);
+                                }
 				c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
 				//thread_worker.post(boost::bind(c_process_msg, callback_arg, std::move(std::string(data_buffer,content_size))));
                             }else{ 
-                                //std::cout << "asio_messenger::async_receive: secondly async_read failed: " << err.message() << std::endl;
+                                // TODO error handing 
                             }
  			    delete[] data_buffer;
                         });
                }else{ 
-                   //std::cout << "asio_messenger::async_receive: firstly async_read failed: " << err.message() << std::endl;
+                   // TODO error handing 
               }
         });
     }
 
     // server receive loop
     // receive msg, hdcs handle it, then send ack.
-   void aio_receive(void* arg){
+   void aio_receive(SessionArg* arg){
         boost::asio::async_read(socket_, boost::asio::buffer(msg_header, header_len), boost::asio::transfer_exactly(header_len),
-        //boost::asio::async_read(socket_, boost::asio::buffer(msg_header, header_len),
             [ this, arg](const boost::system::error_code& err, uint64_t cb) {
                 if(!err){
                     if(cb != header_len){
@@ -324,9 +349,9 @@ public:
                         assert(0);
                     }
                     uint64_t content_size = ((MsgHeader*)msg_header)->get_data_size();
+                    arg->set_seq_id(((MsgHeader*)msg_header)->get_seq_id());
                     char* data_buffer = new char[content_size+1]();
                     boost::asio::async_read( socket_, boost::asio::buffer(data_buffer, content_size ), boost::asio::transfer_exactly(content_size),
-                    //boost::asio::async_read( socket_, boost::asio::buffer(data_buffer, content_size),
                         [this, arg, data_buffer, content_size]( const boost::system::error_code& err, uint64_t cb ){
                             if(!err){
                                 if( content_size != cb ){
@@ -337,21 +362,20 @@ public:
                                     std::cout<<"asio_messenger::async_receive, CRC failed." << std::endl;
                                     assert(0);
                                 }
+				s_process_msg((void*)arg, std::move(std::string(data_buffer,content_size)));
 			        aio_receive(arg);
-				s_process_msg(arg, std::move(std::string(data_buffer,content_size)));
 				//thread_worker.post(boost::bind(s_process_msg, arg, std::move(std::string(data_buffer,content_size))));
                             }else{ 
-                                //std::cout << "asio_messenger::async_receive: secondly async_read failed: " << err.message() << std::endl;
+                                //TODO error handing
                             }
  			    delete[] data_buffer;
                         });
                }else{ 
-                   //std::cout << "asio_messenger::async_receive: firstly async_read failed: " << err.message() << std::endl;
+                    // TODO error handing 
               }
         });
     }
 };
-
 }
 }
 
