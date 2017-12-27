@@ -107,7 +107,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
         }
       });
       char* data;
-      posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+      int ret = posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+      if (ret < 0) {
+        return nullptr;
+      }
       comp->set_reserved_ptr((void*)data);
       std::shared_ptr<Request> req = std::make_shared<Request>(IO_TYPE_FLUSH, data, (block_id * block_size), block_size, comp);
       request_queue->enqueue(req);
@@ -129,7 +132,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
                                  block, block_request_ptr, block_op);
         if (block_request.size < block->block_size) {
           // partial read
-          posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          if (ret < 0) {
+            return nullptr;
+          }
           block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
           block_op = new ReadFromBuffer(block_buffer, block, block_request_ptr, block_op);
           block_op = new ReadBlockFromCache(cache_entry->entry_id, block_buffer, data_store,
@@ -154,7 +160,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
                                  block, block_request_ptr, block_op);
           if (block_request_ptr->size < block->block_size) {
             // partial read
-            posix_memalign((void**)&block_buffer, 4096, block->block_size);
+            int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+            if (ret < 0) {
+              return nullptr;
+            }
             block_op = new UpdateCacheMeta(&(cache_entry->status), FLUSHED,
                                          cache_entry->entry_id,
                                          data_store, block, block_request_ptr, block_op);
@@ -209,7 +218,11 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
           }
           if (block_request_ptr->size < block->block_size) {
             // partial write
-            posix_memalign((void**)&block_buffer, 4096, block->block_size);
+            int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+            if (ret < 0) {
+              return nullptr;
+            }
+
             block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
             block_op = new WriteBlockToCache(cache_entry->entry_id, block_buffer, data_store,
                                              block, block_request_ptr, block_op); 
@@ -247,7 +260,10 @@ BlockOp* CachePolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) 
             }
             if (block_request_ptr->size < block->block_size) {
               // partial write
-              posix_memalign((void**)&block_buffer, 4096, block->block_size);
+              int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+              if (ret < 0) {
+                return nullptr;
+              }
               block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
               block_op = new WriteBlockToCache(cache_entry->entry_id, block_buffer, data_store,
                                                block, block_request_ptr, block_op); 
@@ -383,7 +399,10 @@ void CachePolicy::process() {
           log_print("Signal cache_policy process to continue");
         }
       });
-      posix_memalign((void**)&data, 4096, sizeof(char)*block->block_size);
+      int ret = posix_memalign((void**)&data, 4096, sizeof(char)*block->block_size);
+      if (ret < 0) {
+        return;
+      }
       comp->set_reserved_ptr((void*)data);
       std::shared_ptr<Request> req = std::make_shared<Request>(IO_TYPE_DEMOTE_CACHE, data, (block->block_id * block->block_size), block->block_size, comp);
       request_queue->enqueue(req);
@@ -426,7 +445,10 @@ void CachePolicy::flush_all() {
         flush_all_cond.notify_all();
       }
     });
-    posix_memalign((void**)&data, 4096, sizeof(char)*block->block_size);
+    int ret = posix_memalign((void**)&data, 4096, sizeof(char)*block->block_size);
+    if (ret < 0) {
+      return;
+    }
     comp->set_reserved_ptr((void*)data);
     std::shared_ptr<Request> req = std::make_shared<Request>(IO_TYPE_FLUSH, data, (block->block_id * block->block_size), block->block_size, comp);
     request_queue->enqueue(req);

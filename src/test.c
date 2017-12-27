@@ -41,8 +41,12 @@ int main(int argc, char **argv) {
     void* comp;
     char* data;
     char c = 'a';
-    posix_memalign((void**)&data, 4096, stoi(arg2));
-	  hdcs_aio_create_completion(&c, finish_aio_cb, &comp);
+    r = posix_memalign((void**)&data, 4096, stoi(arg2));
+    if (r < 0) {
+      printf("Can't allocate memory for data, test failed!");
+      goto failed;
+    }
+    hdcs_aio_create_completion(&c, finish_aio_cb, &comp);
     hdcs_aio_read(hdcs, data, stoi(arg1), stoi(arg2), comp);
     hdcs_aio_wait_for_complete(comp);
     r = hdcs_aio_get_return_value(comp);

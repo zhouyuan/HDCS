@@ -65,7 +65,10 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
       void* ret_data_ptr = io_ctx->ret_data_ptr;
       uint64_t length = io_ctx->length;
       char* aligned_data;
-      posix_memalign((void**)&aligned_data, 4096, io_ctx->length);
+      int ret = posix_memalign((void**)&aligned_data, 4096, io_ctx->length);
+      if (ret < 0) {
+        break;
+      }
 
       comp = new AioCompletionImp([this, session_id, aligned_data,
                     hdcs_inst, cli_comp, length, ret_data_ptr](ssize_t r){
@@ -95,7 +98,10 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
       hdcs_inst = (core::HDCSCore*)io_ctx->hdcs_inst; 
       void* cli_comp = io_ctx->comp;
       char* aligned_data;
-      posix_memalign((void**)&aligned_data, 4096, io_ctx->length);
+      int ret = posix_memalign((void**)&aligned_data, 4096, io_ctx->length);
+      if (ret < 0) {
+        break;
+      }
       memcpy(aligned_data, data, io_ctx->length);
 
       comp = new AioCompletionImp([this, session_id, aligned_data, hdcs_inst, cli_comp](ssize_t r){
