@@ -9,7 +9,7 @@ CXXFLAGS=-std=c++11 ${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${
 CCFLAGS=${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 #PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread -lrbd -lrados
 PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lboost_program_options -lpthread
-INCS=-I./
+INCS=-I./ -I../unittest/include
 CONTROLLER = HDCS
 DIST_LIB = lib/libhdcs.so
 TEST_TOOL = hdcs_test_tool
@@ -37,10 +37,11 @@ $(DIST_LIB):
 $(TEST_TOOL): $(DIST_LIB)
 	${CXX} ${CXXFLAGS} ${INCS} test.c -o $@ $^ -Llib -lhdcs
 
-test:
-	${CXX} ${CXXFLAGS} ${INCS} ../unittest/test_common/testrun.cpp -o $@ $^ ../unittest/lib/libgmock.a -pthread
-	echo "./test" | bash
+UNIT_TESTS:= ../unittest/test_common/test_WorkQueue.o
 
+test: $(UNIT_TESTS)
+	${CXX} ${CXXFLAGS} ${INCS} ../unittest/testrun.cpp -o $@ $^ ../unittest/lib/libgmock.a -pthread
+	echo "./test" | bash
 
 clean:
 	rm -f test $(CONTROLLER) $(DIST_LIB) $(TEST_TOOL) && find . -name "*.o" | xargs rm -f

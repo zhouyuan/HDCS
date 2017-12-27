@@ -1,18 +1,17 @@
 #include <iostream>
 
-#include "rbc/common/WorkQueue.h"
+#include "../src/common/WorkQueue.h"
 #include "gtest/gtest.h"
 
 using std::cout;
 using std::endl;
-using namespace rbc;
+using namespace hdcs;
 
 class TEST_WORK_QUEUE{
 public:
 
     int basic_push_pop();
     int pop_empty();
-    int push_pop_complex();
 
 private:
     WorkQueue<void*> request_queue;
@@ -60,31 +59,6 @@ int TEST_WORK_QUEUE::pop_empty()
     }
 }
 
-int TEST_WORK_QUEUE::push_pop_complex()
-{
-    int* push_pointer2;
-    for (int i=0; i<3; i++)
-    {
-        request_queue.enqueue(push_pointer2);
-        push_pointer2++;
-    }
-    void* pop_pointer2;
-    for (int j=0; j<3; j++)
-    {
-        pop_pointer2 =  request_queue.dequeue();
-        if (pop_pointer2 == (push_pointer2-(6-j)))
-        {
-            cout << "pop queue pointer is right" << endl;
-        }else
-        {
-            cout << "pop pointer failed" << endl;
-            return -1;
-            break;
-        }
-    }
-    return 0;
-}
-
 TEST_WORK_QUEUE work_queue;
 
 TEST (WORK_QUEUE, basic_push_pop)
@@ -95,9 +69,4 @@ TEST (WORK_QUEUE, basic_push_pop)
 TEST (WORK_QUEUE, pop_empty)
 {
     ASSERT_EQ(0, work_queue.pop_empty());
-}
-
-TEST (WORK_QUEUE, push_pop_complex)
-{
-    ASSERT_EQ(0, work_queue.push_pop_complex());
 }
