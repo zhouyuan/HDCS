@@ -5,12 +5,12 @@
 #include <memory>
 #include "../common/networking_common.h"
 #include "../common/session.h"
-#include "../common/aio_complete_impl.h"
 #include "asio_messenger.h"
 #define SESSION_TIMEOUT 30
 
 namespace hdcs{
 namespace networking{
+
 class asio_session: public Session{
 private:
     std::shared_ptr<asio_messenger> m_messenger;
@@ -18,18 +18,20 @@ private:
     std::atomic<bool> session_work;
     boost::posix_time::ptime last_active;
     int role;
-    std::atomic<bool> is_busy;
+    SessionArg* session_arg_ptr;
 
 public:
     asio_session( IOService& _io_service , int _role) 
         : m_messenger(new asio_messenger( _io_service, _role ))
         , role(_role) 
-    {  
-        is_busy.store(false);
-    }
+        , session_arg_ptr(NULL) 
+    {}
 
     ~asio_session(){
         close();
+        if(role==1 && session_arg_ptr!=NULL){
+            delete session_arg_ptr;
+        }
     }
 
     void close(){
@@ -51,7 +53,8 @@ public:
 
     bool start( ProcessMsg _process_msg ){
         m_messenger->set_server_process_msg(_process_msg);
-	m_messenger->aio_receive((void*)this);
+        session_arg_ptr = new SessionArg((void*)this);
+	m_messenger->aio_receive(session_arg_ptr);
         return true;
     }
 
@@ -59,16 +62,13 @@ public:
         return m_messenger->sync_connection(ip_address, port, _process_msg);
     }
    
-    int async_connection( std::string ip_address, short port, std::shared_ptr<aio_complete> _onfinish){
+    int async_connection(){
+        // TODO
         return 1;
     }
 
-    ssize_t sync_send(std::string send_buffer){
-        return m_messenger->sync_send(send_buffer);
-    }
-
-    int async_send(std::string send_buffer){
-       return m_messenger->async_send(send_buffer);
+    int async_send(std::string send_buffer, uint64_t _seq_id){
+       return m_messenger->async_send(send_buffer, _seq_id);
     }
 
     void update_time(){
@@ -80,36 +80,18 @@ public:
         return ((now - last_active).total_milliseconds() > SESSION_TIMEOUT)?true:false;
     }
 
-    bool if_session_work(){
-        return session_work;
-    }
-	
-    bool set_session_work(bool temp){
-        session_work=temp;
-    }
-
-    void set_busy(){
-        is_busy.store(true);
-    }
-
-    void set_idle(){
-        is_busy.store(false);
-    }
-
-    bool if_busy(){
-        return is_busy.load();
-    }
-
     boost::asio::ip::tcp::socket& get_stream(){
         return m_messenger->get_socket();
     }
 
-    ssize_t communicate(std::string send_buffer){
-        return m_messenger->communicate(send_buffer);
+    // called by client
+    ssize_t communicate(std::string send_buffer, uint64_t _seq_id){
+        return m_messenger->communicate(send_buffer, _seq_id);
     }
 
-    void aio_communicate(std::string& send_buffer){
-        m_messenger->aio_communicate(send_buffer);
+    // called by client
+    void aio_communicate(std::string& send_buffer, uint64_t _seq_id){
+        m_messenger->aio_communicate(send_buffer, _seq_id);
     }
     
 };

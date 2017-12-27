@@ -17,7 +17,6 @@ class server{
 private:
     SessionSet session_set; 
     std::unique_ptr<Acceptor> acceptor_ptr;
-    std::unique_ptr<std::thread> check_session_thread;
     std::atomic<bool> is_stop;
 
 public:
@@ -25,8 +24,6 @@ public:
     server(std::string _ip_address, std::string _port_num, int s_num=10, int thd_num=10): 
         is_stop(false){
         acceptor_ptr.reset(new Acceptor( _ip_address, _port_num, session_set , s_num, thd_num));
-        //check_session_thread.reset(new std::thread([this](){loop_check_session();}));
-        //check_session_thread->detach();
     }
 
     ~server(){
@@ -51,34 +48,18 @@ public:
     }
 
     //this is async send, but hdcs use this interface name.
-    void send(void* session_id, std::string send_buffer, OnSentServer _callback=NULL){
-        async_send(session_id, send_buffer);   
+    void send(void* session_arg, std::string send_buffer, OnSentServer _callback=NULL){
+        async_send(session_arg, send_buffer);   
     }
 
-    void async_send(void* session_id, std::string& send_buffer ){
-        if(session_set.find((Session*)session_id)==session_set.end()){
+    void async_send(void* session_arg, std::string& send_buffer ){
+        Session* temp_s_id = (Session*)(((SessionArg*)session_arg)->get_session_id());
+        if(session_set.find(temp_s_id)==session_set.end()){
             std::cout<<"Networking::server: finding session_id failed. Maybe need to re-connction "<<std::endl;
             assert(0);
         }
-        ((Session*)session_id)->async_send(send_buffer);
+        temp_s_id->async_send(send_buffer, ((SessionArg*)session_arg)->get_seq_id());
     }
-
-    
-private:
-
-    void loop_check_session(){
-        while(!is_stop.load()){
-            for(auto it=session_set.begin(); it!=session_set.end(); ++it){
-                if( (!((*it)->if_session_work())) || ( (*it)->if_timeout()) ){
-                    std::cout<<"delete session, id is "<<(*it)<<std::endl;
-                    (*it)->close();
-                    session_set.erase(it);	
-                }
-            }
-            std::this_thread::sleep_for(std::chrono::seconds(CHECK_SESSION_INTERVAL));
-        }
-    }
-
 }; 
 }
 }

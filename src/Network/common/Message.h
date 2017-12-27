@@ -15,11 +15,12 @@
 
 namespace hdcs{
 namespace networking{
+
 struct MsgHeader {
-  const uint64_t msg_flag;
+  const uint64_t seq_id;
   uint64_t size; // msg content size
   char crc_flag[CRC_BYTE_NUM];
-  MsgHeader(uint64_t size, const char* _crc):msg_flag(0xFFFFFFFFFFFFFFFF),size(size){
+  MsgHeader(uint64_t size, const char* _crc, uint64_t _seq_id):seq_id(_seq_id),size(size){
     for(int i=0; i<CRC_BYTE_NUM; ++i){
         crc_flag[i]=_crc[i];
     }
@@ -28,19 +29,23 @@ struct MsgHeader {
   uint64_t get_data_size() {
     return size;
   }
+
+  uint64_t get_seq_id(){
+    return seq_id;
+  }
 };
 
 
 struct Message {
   MsgHeader header;
   std::string data;
-  Message(char* data, uint64_t size) 
-      : header(size, data + size - CRC_BYTE_NUM)
+  Message(char* data, uint64_t size, uint64_t _seq_id) 
+      : header(size, data + size - CRC_BYTE_NUM, _seq_id)
       , data(data)
     {}
 
-  Message(std::string data) 
-    : header(data.size(), data.c_str()+data.size()-CRC_BYTE_NUM)
+  Message(std::string data, uint64_t _seq_id) 
+    : header(data.size(), data.c_str()+data.size()-CRC_BYTE_NUM, _seq_id)
     , data(data) {}
 
   std::string to_buffer() {
@@ -59,7 +64,7 @@ inline bool check_crc(const char* msg_header, const char* msg_content, const uin
     MsgHeader* temp = (MsgHeader*)msg_header; 
     for(int i=0; i< CRC_BYTE_NUM; i++){
         if((temp->crc_flag)[i] != msg_content[content_size-CRC_BYTE_NUM+i]){
-            std::cout<<"check_crc: failed.."<<std::endl;;
+            std::cout<<"check_crc: failed.."<<std::endl;
             return false;
         }
     }
