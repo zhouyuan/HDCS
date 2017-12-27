@@ -56,7 +56,11 @@ BlockOp* TierPolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) {
     case IO_TYPE_READ:
       //read
       if (block->entry == UNPROMOTED) {
-        posix_memalign((void**)&block_buffer, 4096, block->block_size);
+        int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+        if (ret < 0) {
+          return nullptr;
+        }
+
         block_op = new UpdateTierMeta(FLUSHED, &(block->entry->status), data_store,
                                       block, block_request_ptr, block_op);
         block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
@@ -68,7 +72,11 @@ BlockOp* TierPolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) {
       } else {
         if (block_request.size < block->block_size) {
           // partial read
-          posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          if (ret < 0) {
+            return nullptr;
+          }
+
           block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
           block_op = new ReadFromBuffer(block_buffer, block, block_request_ptr, block_op);
           block_op = new ReadBlockFromCache(block_id, block_buffer, data_store,
@@ -87,7 +95,11 @@ BlockOp* TierPolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) {
       if (block->entry == UNPROMOTED) {
         if (block_request_ptr->size < block->block_size) {
           // partial write
-          posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          if (ret < 0) {
+            return nullptr;
+          }
+
           block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
   
           // todo
@@ -106,7 +118,11 @@ BlockOp* TierPolicy::map(BlockRequest &&block_request, BlockOp** block_op_end) {
       } else {
         if (block_request_ptr->size < block->block_size) {
           // partial write
-          posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          int ret = posix_memalign((void**)&block_buffer, 4096, block->block_size);
+          if (ret < 0) {
+            return nullptr;
+          }
+
           block_op = new DemoteBlockBuffer(block_buffer, block, block_request_ptr, block_op);
           // todo
           block_op = new ExecuteDataStoreRequest(block_id, block_buffer, data_store,
@@ -180,7 +196,11 @@ void TierPolicy::flush_all() {
         flush_all_cond.notify_all();
       }
     });
-    posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+    int ret = posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+    if (ret < 0) {
+      return;
+    }
+
     comp->set_reserved_ptr((void*)data);
     std::shared_ptr<Request> req = std::make_shared<Request>(IO_TYPE_FLUSH, data, (block_id * block_size), block_size, comp);
     request_queue->enqueue(req);
@@ -214,7 +234,10 @@ void TierPolicy::promote_all() {
         flush_all_cond.notify_all();
       }
     });
-    posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+    int ret = posix_memalign((void**)&data, 4096, sizeof(char)*block_size);
+    if (ret < 0) {
+      return;
+    }
     comp->set_reserved_ptr((void*)data);
     std::shared_ptr<Request> req = std::make_shared<Request>(IO_TYPE_PROMOTE, data, (block_id * block_size), block_size, comp);
     request_queue->enqueue(req);
