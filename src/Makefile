@@ -8,8 +8,8 @@ OPT=$(OPTIMIZATION)
 CXXFLAGS=-std=c++11 ${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 CCFLAGS=${OPT} -fPIC -g -D__STDC_FORMAT_MACROS -DLIBRBC_VERSION='"${LIBRBC_VERSION}"'
 #PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread -lrbd -lrados
-PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lpthread
-INCS=-I./
+PLATFORM_LDFLAGS=-lboost_thread -lboost_system -lboost_program_options -lpthread
+INCS=-I./ -I../unittest/include
 CONTROLLER = HDCS
 DIST_LIB = lib/libhdcs.so
 TEST_TOOL = hdcs_test_tool
@@ -23,55 +23,29 @@ all: $(DIST_LIB) $(CONTROLLER) $(TEST_TOOL)
 %.o : %.c
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
-COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o 
+COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o HDCSController.o
 
 RBD_OBJECTS:= store/RBD/RBDImageStore.o 
 
-
-HDCSCore_cache.oo : core/HDCSCore.cpp
-	${CXX} -c ${CXXFLAGS} -DCACHE_POLICY ${INCS} $< -o $@
-
-HDCSCore_tier.oo : core/HDCSCore.cpp
-	${CXX} -c ${CXXFLAGS} -DTIER_POLICY ${INCS} $< -o $@
-
-HDCSCore.oo : core/HDCSCore.cpp
-	${CXX} -c ${CXXFLAGS} -DCACHE_POLICY -DTIER_POLICY ${INCS} $< -o $@
-
-HDCSController.oo :
-	${CXX} ${CXXFLAGS} -DCACHE_POLICY -DTIER_POLICY ${INCS} core/HDCSCore.cpp HDCSController.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
-
-CACHE_CORE_OBJECTS := HDCSCore_cache.oo
-TIER_CORE_OBJECTS := HDCSCore_tier.oo
-HDCS_CORE_OBJECTS := HDCSCore.oo
-HDCS_CONTROLLER_OBJECTS := HDCSController.oo
-
-ifeq ($(POLICY),CACHE)
-$(DIST_LIB): core/policy/CachePolicy.o $(COMMON_OBJECTS) $(RBD_OBJECTS) $(CACHE_CORE_OBJECTS)
-	mkdir -p lib
-	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
-endif
-ifeq ($(POLICY), TIER)
-$(DIST_LIB): core/policy/TierPolicy.o $(COMMON_OBJECTS) $(RBD_OBJECTS) $(TIER_CORE_OBJECTS)
-	mkdir -p lib
-	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
-endif
-
-ifeq ($(POLICY), ALL)
-#$(CONTROLLER): core/policy/CachePolicy.o core/policy/TierPolicy.o $(COMMON_OBJECTS) $(RBD_OBJECTS) $(NETWORK_OBJECTS)
-$(CONTROLLER): core/policy/CachePolicy.o core/policy/TierPolicy.o $(COMMON_OBJECTS) $(RBD_OBJECTS)
-	${CXX} ${CXXFLAGS} ${INCS} -DCACHE_POLICY -DTIER_POLICY core/HDCSCore.cpp HDCSController.cpp HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
-#	${CXX} ${CXXFLAGS} ${INCS} -DTIER_POLICY core/policy/TierPolicy.cpp core/HDCSCore.cpp HDCSController.cpp HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
-endif
+$(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS)
+	${CXX} ${CXXFLAGS} ${INCS} -DCACHE_POLICY -DTIER_POLICY HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
 
 $(DIST_LIB):
 	mkdir -p lib
 	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
 
-$(TEST_TOOL):
+$(TEST_TOOL): $(DIST_LIB)
 	${CXX} ${CXXFLAGS} ${INCS} test.c -o $@ $^ -Llib -lhdcs
 
+UNIT_TESTS:= ../unittest/test_common/test_WorkQueue.o
+
+test: $(UNIT_TESTS)
+	${CXX} ${CXXFLAGS} ${INCS} ../unittest/testrun.cpp -o $@ $^ ../unittest/lib/libgmock.a -pthread
+	echo "./test" | bash
+
 clean:
-	rm -rf *.oo common/*.o core/*.o core/*.oo store/SimpleStore/*.o store/RBD/*.o core/policy/*.o Network/*.o lib/libhdcs.so hdcs_test_tool HDCS
+	rm -f test $(CONTROLLER) $(DIST_LIB) $(TEST_TOOL) && find . -name "*.o" | xargs rm -f
+
 uninstall:
 	rm -rf /usr/local/include/hdcs
 	rm -rf /usr/local/lib/libhdcs.so

@@ -11,17 +11,6 @@ mkdir -p $DEPS_SRC_DIR
 mkdir -p $DEPS_UT_SRC_DIR
 mkdir -p $DEPS_UT_LIB_DIR
 
-# CPP_Redis
-cd $DEPS_SRC_DIR
-## Fetch the cppredis sources
-git clone https://github.com/zhouyuan/cpp_redis.git
-cd cpp_redis; git checkout origin/build_shared_lib; cmake .; make && make install
-
-# Rocksdb
-cd $DEPS_SRC_DIR
-## Fetch the rocksdb sources
-git clone https://github.com/facebook/rocksdb.git
-cd rocksdb; git checkout v4.8; make shared_lib && make install-shared
 
 . /etc/os-release
 
