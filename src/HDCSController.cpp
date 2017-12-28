@@ -2,8 +2,8 @@
 #include "HDCSController.h"
 
 namespace hdcs {
-HDCSController::HDCSController(struct hdcs_repl_options repl_opt, std::string config_name): config_name(config_name) {
-  config = new Config("", repl_opt.role, repl_opt.replication_nodes, config_name);
+HDCSController::HDCSController(struct hdcs_repl_options repl_opt, std::string config_name): replication_options(repl_opt), config_name(config_name) {
+  config = new Config("", replication_options, config_name);
   std::string log_path = config->configValues["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
   if( log_path!="false" ){
@@ -45,7 +45,7 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
       hdcs_core_map_mutex.lock();
       auto it = hdcs_core_map.find(name);
       if (it == hdcs_core_map.end()) {
-        core::HDCSCore* core_inst = new core::HDCSCore(name, config->configValues["role"], config->configValues["replication_nodes"]);
+        core::HDCSCore* core_inst = new core::HDCSCore(name, config->configValues["cfg_file_path"], replication_options);
         auto ret = hdcs_core_map.insert(std::pair<std::string, core::HDCSCore*>(name, core_inst));
         assert (ret.second);
         it = ret.first;

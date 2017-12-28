@@ -16,8 +16,8 @@
 
 namespace hdcs {
 namespace core {
-HDCSCore::HDCSCore(std::string name, std::string myrole, std::string replication_nodes) {
-  config = new Config(name);
+HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_options replication_options) {
+  config = new Config(name, replication_options, cfg_file);
 
   std::string log_path = config->configValues["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
@@ -39,7 +39,7 @@ HDCSCore::HDCSCore(std::string name, std::string myrole, std::string replication
   std::string volume_name = name;
 
   //connect to its replication_nodes
-  if ("hdcs_master" == myrole) {
+  if ("hdcs_master" == replication_options.role) {
     connect_to_replica(name);
   }
 

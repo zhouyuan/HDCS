@@ -37,14 +37,15 @@ $(DIST_LIB):
 $(TEST_TOOL): $(DIST_LIB)
 	${CXX} ${CXXFLAGS} ${INCS} test.c -o $@ $^ -Llib -lhdcs
 
-UNIT_TESTS:= ../unittest/test_common/test_WorkQueue.o
+UNIT_TESTS:= ../unittest/test_common/test_WorkQueue.o \
+	     ../unittest/test_common/test_Config.o
 
 test: $(UNIT_TESTS)
 	${CXX} ${CXXFLAGS} ${INCS} ../unittest/testrun.cpp -o $@ $^ ../unittest/lib/libgmock.a -pthread
-	echo "./test" | bash
+	echo "./test --gtest_output='xml:testresult.xml'" | bash
 
 clean:
-	rm -f test $(CONTROLLER) $(DIST_LIB) $(TEST_TOOL) && find . -name "*.o" | xargs rm -f
+	rm -f test testresult.xml $(CONTROLLER) $(DIST_LIB) $(TEST_TOOL) $(UNIT_TESTS) && find . -name "*.o" | xargs rm -f
 
 uninstall:
 	rm -rf /usr/local/include/hdcs

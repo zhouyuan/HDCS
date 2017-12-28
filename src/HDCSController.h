@@ -9,12 +9,6 @@
 
 namespace hdcs {
 
-  struct hdcs_repl_options {
-    hdcs_repl_options(std::string role, std::string replication_nodes): role(role), replication_nodes(replication_nodes){};
-    std::string role;
-    std::string replication_nodes;
-  };
-
   class HDCSController {
   public:
     HDCSController(struct hdcs_repl_options repl_opt, std::string config_name);
@@ -23,6 +17,7 @@ namespace hdcs {
   private:
     Config *config;
     std::string config_name;
+    struct hdcs_repl_options replication_options;
     networking::server *network_service;
     std::map<std::string, core::HDCSCore*> hdcs_core_map;
     std::mutex hdcs_core_map_mutex;

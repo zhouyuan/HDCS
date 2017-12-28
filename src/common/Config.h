@@ -18,11 +18,19 @@
 
 namespace hdcs {
 
+struct hdcs_repl_options {
+  hdcs_repl_options(std::string role, std::string replication_nodes): role(role), replication_nodes(replication_nodes){};
+  std::string role;
+  std::string replication_nodes;
+};
+
+
 class Config{
 
 public:
     typedef std::map<std::string, std::string> ConfigInfo;
     ConfigInfo configValues{
+        {"cfg_file_path","/etc/hdcs/general.conf"},
         {"log_to_file","false"},
         {"rbd_pool_name","rbd"},
         {"rbd_volume_name","volume_1"},
@@ -36,7 +44,7 @@ public:
         {"cache_min_alloc_size","4096"},
         {"op_threads_num","64"},
     };
-    Config(std::string name, std::string myrole="slave", std::string replication_nodes="192.168.1.1:9091", std::string config_name="general.conf"){
+    Config(std::string name, struct hdcs_repl_options replication_options, std::string config_name="/etc/hdcs/general.conf"){
 
         const std::string cfg_file = config_name;
         boost::property_tree::ptree pt;
@@ -48,6 +56,7 @@ public:
             // assume general.conf should be created by admin manually
             assert(0);
         }
+        configValues["cfg_file_path"] = cfg_file;
 
         std::string s;
         //scan global section, overwrite default config
@@ -67,10 +76,10 @@ public:
           //FIXME(): rbd with blank name?
           // accept role from cmdline
           // if role is not master/slave, then assert
-          if ("master" == myrole) {
+          if ("master" == replication_options.role) {
             configValues["role"] = "hdcs_master";
-            configValues["replication_nodes"] = replication_nodes;
-          } else if ("slave" == myrole) {
+            configValues["replication_nodes"] = replication_options.replication_nodes;
+          } else if ("slave" == replication_options.role) {
             configValues["role"] = "hdcs_replca";
             configValues["replication_nodes"] = "";
           } else {
