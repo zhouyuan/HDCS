@@ -318,14 +318,15 @@ public:
                                     assert(0);
                                 }
                                 aio_receive();
-				//c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
+
+                                //trigger request handler first
+				c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
                                 if(pending_msg_map.size()!=0){
                                     // lock? TODO
                                     pending_msg_map[sequence_id]->Done();
                                     delete pending_msg_map[sequence_id];
                                     pending_msg_map.erase(sequence_id);
                                 }
-				c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
 				//thread_worker.post(boost::bind(c_process_msg, callback_arg, std::move(std::string(data_buffer,content_size))));
                             }else{ 
                                 // TODO error handing 
