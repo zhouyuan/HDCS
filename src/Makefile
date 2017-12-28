@@ -28,7 +28,7 @@ COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o 
 RBD_OBJECTS:= store/RBD/RBDImageStore.o 
 
 $(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS)
-	${CXX} ${CXXFLAGS} ${INCS} -DCACHE_POLICY -DTIER_POLICY HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
+	${CXX} ${CXXFLAGS} ${INCS} HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
 
 $(DIST_LIB):
 	mkdir -p lib
