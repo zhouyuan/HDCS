@@ -20,7 +20,7 @@ namespace core {
   public:
     std::mutex core_lock;
     WorkQueue<std::shared_ptr<Request>> request_queue;
-    HDCSCore(std::string name, std::string myrole="hdcs_replica", std::string replication_nodes="192.168.1.1:9091");
+    HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_options replication_options);
     ~HDCSCore();
     void close();
     void promote_all();
