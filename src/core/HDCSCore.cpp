@@ -2,12 +2,8 @@
 
 #include "core/HDCSCore.h"
 
-#if defined(CACHE_POLICY)
 #include "core/policy/CachePolicy.h"
-#endif
-#if defined(TIER_POLICY)
 #include "core/policy/TierPolicy.h"
-#endif
 #include "store/SimpleStore/SimpleBlockStore.h"
 #include "store/RBD/RBDImageStore.h"
 
@@ -39,7 +35,7 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
   std::string volume_name = name;
 
   //connect to its replication_nodes
-  if ("hdcs_master" == replication_options.role) {
+  if ("hdcs_master" == replication_options.role && replication_options.replication_nodes != "") {
     connect_to_replica(name);
   }
 
@@ -49,7 +45,6 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
   BlockMap* block_ptr_map = block_guard->get_block_map();
 
   if (cache_policy_mode) {
-#if defined(CACHE_POLICY)
     uint64_t cache_size = stoull(config->configValues["cache_total_size"]);
     float cache_ratio_health = stof(config->configValues["cache_ratio_health"]);
     uint64_t timeout_nanosecond = stoull(config->configValues["cache_dirty_timeout_nanoseconds"]);
@@ -59,14 +54,11 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
                       new store::RBDImageStore(pool_name, volume_name, block_size),
                       cache_ratio_health, &request_queue,
                       timeout_nanosecond, cache_mode, hdcs_thread_max);
-#endif
   } else {
-#if defined(TIER_POLICY)
     policy = new TierPolicy(total_size, block_size, block_ptr_map,
                     new store::SimpleBlockStore(path, total_size, total_size, block_size),
                     new store::RBDImageStore(pool_name, volume_name, block_size),
                     &request_queue, hdcs_thread_max);
-#endif
   }
 
   go = true;
