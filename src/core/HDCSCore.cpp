@@ -1,14 +1,13 @@
 // Copyright [2017] <Intel>
 
 #include "core/HDCSCore.h"
-
 #include "core/policy/CachePolicy.h"
 #include "core/policy/TierPolicy.h"
 #include "store/SimpleStore/SimpleBlockStore.h"
 #include "store/RBD/RBDImageStore.h"
+#include "common/HDCS_REQUEST_HANDLER.h"
 
 #include <string>
-#include "common/HDCS_REQUEST_HANDLER.h"
 #include <boost/algorithm/string.hpp>
 
 namespace hdcs {
@@ -77,7 +76,6 @@ HDCSCore::~HDCSCore() {
   }
   delete policy;
   delete block_guard;
-  main_thread->join();
   delete main_thread;
 }
 
@@ -200,7 +198,7 @@ void HDCSCore::connect_to_replica (std::string name) {
 
     io_ctx = (hdcs_ioctx_t*)malloc(sizeof(hdcs_ioctx_t));
     replication_core_map[addr_port_str] = (void*)io_ctx;
-    io_ctx->conn = new hdcs::networking::Connection([](void* p, std::string s){client::request_handler(p, s);}, 16, 5);
+    io_ctx->conn = new hdcs::networking::Connection([](void* p, std::string s){request_handler(p, s);}, 16, 5);
     io_ctx->conn->connect(addr, port);
     io_ctx->conn->set_session_arg((void*)io_ctx);
 

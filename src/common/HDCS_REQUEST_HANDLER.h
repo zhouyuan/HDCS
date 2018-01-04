@@ -6,9 +6,9 @@
 #include "../Network/hdcs_networking.h"
 #include "common/HDCS_REQUEST_CTX.h"
 
-namespace client {
+//namespace client {
 
-void request_handler(void* io, std::string msg_content) {
+static void request_handler(void* io, std::string msg_content) {
   hdcs::HDCS_REQUEST_CTX_T *io_ctx =  (hdcs::HDCS_REQUEST_CTX_T*)(msg_content.c_str());
     char* data = &msg_content[sizeof(hdcs::HDCS_REQUEST_CTX_T)];
     switch (io_ctx->type) {
@@ -45,5 +45,5 @@ void request_handler(void* io, std::string msg_content) {
     }
 }
 
-}//client
+//}//client
 #endif

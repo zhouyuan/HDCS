@@ -7,11 +7,13 @@
 #include "common/Config.h"
 #include "common/ThreadPool.h"
 #include "common/tq.h"
+#include "common/HDCS_REQUEST_HANDLER.h"
 #include "core/BlockRequest.h"
 #include "core/BlockGuard.h"
 #include "core/policy/Policy.h"
 #include <mutex>
 #include <map>
+#include <atomic>
 #include <string>
 
 namespace hdcs {
@@ -31,7 +33,7 @@ namespace core {
   private:
     TWorkQueue *hdcs_op_threads;
     std::thread *main_thread;
-    bool go;
+    std::atomic<bool> go;
     Config *config;
     Policy* policy;
     BlockGuard* block_guard;

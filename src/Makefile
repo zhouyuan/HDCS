@@ -24,15 +24,16 @@ all: $(DIST_LIB) $(CONTROLLER) $(TEST_TOOL)
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
 COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o HDCSController.o
+LIB_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o
 
 RBD_OBJECTS:= store/RBD/RBDImageStore.o 
 
 $(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS)
 	${CXX} ${CXXFLAGS} ${INCS} HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
 
-$(DIST_LIB):
+$(DIST_LIB): $(LIB_OBJECTS) $(RBD_OBJECTS)
 	mkdir -p lib
-	${CXX} ${CXXFLAGS} ${INCS} libhdcs.c -shared -o $@ $^ ${PLATFORM_LDFLAGS}
+	${CXX} ${CXXFLAGS} ${INCS} libhdcs.cpp -shared -o $@ $^ ${PLATFORM_LDFLAGS}
 
 $(TEST_TOOL): $(DIST_LIB)
 	${CXX} ${CXXFLAGS} ${INCS} test.c -o $@ $^ -Llib -lhdcs
