@@ -25,7 +25,7 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
   }
 
   int hdcs_thread_max = stoi(config->configValues["op_threads_num"]);
-  hdcs_op_threads = new TWorkQueue( hdcs_thread_max );
+  hdcs_op_threads = new TWorkQueue(hdcs_thread_max);
   uint64_t total_size = stoull(config->configValues["total_size"]);
   uint64_t block_size = stoull(config->configValues["cache_min_alloc_size"]);
   bool cache_policy_mode = config->configValues["policy_mode"].compare(std::string("cache")) == 0 ? true : false;
