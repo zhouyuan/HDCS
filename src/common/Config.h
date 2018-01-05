@@ -72,21 +72,18 @@ public:
             s = "";
         }
 
-        if (name == "") {
-          //FIXME(): rbd with blank name?
-          // accept role from cmdline
-          // if role is not master/slave, then assert
-          if ("master" == replication_options.role) {
-            configValues["role"] = "hdcs_master";
-            configValues["replication_nodes"] = replication_options.replication_nodes;
-          } else if ("slave" == replication_options.role) {
-            configValues["role"] = "hdcs_replca";
-            configValues["replication_nodes"] = "";
-          } else {
-            assert(0);
-          }
-
+        // accept role from cmdline
+        // if role is not master/slave, then assert
+        if ("master" == replication_options.role) {
+          configValues["role"] = "hdcs_master";
+          configValues["replication_nodes"] = replication_options.replication_nodes;
+        } else if ("slave" == replication_options.role) {
+          configValues["role"] = "hdcs_replica";
+          configValues["replication_nodes"] = "";
+        } else {
+          assert(0);
         }
+
         configValues["rbd_volume_name"] = name;
         configValues["cache_dir_dev"] = configValues["cache_dir"] + "/" + name + "_cache.data";
         configValues["cache_dir_meta"] = configValues["cache_dir"] + "/" + name + "_meta";
