@@ -9,6 +9,7 @@
 
 #include <string>
 #include "common/HDCS_REQUEST_HANDLER.h"
+#include <boost/algorithm/string.hpp>
 
 namespace hdcs {
 namespace core {
@@ -35,7 +36,7 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
   std::string volume_name = name;
 
   //connect to its replication_nodes
-  if ("hdcs_master" == replication_options.role && replication_options.replication_nodes != "") {
+  if ("master" == replication_options.role && replication_options.replication_nodes != "") {
     connect_to_replica(name);
   }
 
@@ -179,25 +180,23 @@ void HDCSCore::aio_write (char* data, uint64_t offset, uint64_t length,  void* a
 }
 
 void HDCSCore::connect_to_replica (std::string name) {
+  assert("hdcs_master" == config->configValues["role"]);
   std::string addr;
   std::string port;
   int colon_pos, last_pos;
   char c;
 
   hdcs_ioctx_t* io_ctx;
-  std::istringstream iss(config->configValues["replication_nodes"]);
-  std::vector<std::string> replication_nodes((std::istream_iterator<WordDelimitedBy<','>>(iss)),
-                                       std::istream_iterator<WordDelimitedBy<','>>());
-  int replication_nodes_num = replication_nodes.size();
-  for (auto &addr_port_str : replication_nodes) {
-    colon_pos = addr_port_str.find(':');
-    addr = addr_port_str.substr(0, colon_pos);
-    c = addr_port_str.at(addr_port_str.length() - 1);
+  std::string iss(config->configValues["replication_nodes"]);
+  boost::erase_all(iss, " ");
+  std::vector<std::string> replication_nodes;
+  boost::split(replication_nodes, iss, boost::is_any_of(","));
 
-    if (c == ',') last_pos = 2;
-    else last_pos = 1;
-    port = addr_port_str.substr(colon_pos + 1, addr_port_str.length() - colon_pos - last_pos);
-    std::cout << "Connect to replication_node: " << addr << " : " << port << std::endl;
+  for (auto &addr_port_str : replication_nodes) {
+    std::vector<std::string> ip_port;
+    boost::split(ip_port, addr_port_str, boost::is_any_of(":"));
+    addr = ip_port[0];
+    port = ip_port[1];
 
     io_ctx = (hdcs_ioctx_t*)malloc(sizeof(hdcs_ioctx_t));
     replication_core_map[addr_port_str] = (void*)io_ctx;
