@@ -48,7 +48,10 @@ public:
 
         for (int i = 0; i < _thread_num; ++i)
         {
-            _threads.push_back(std::thread([this](){_io_service.run();}));
+            _threads.push_back(std::thread([this](){
+                        _io_service.run();
+                        //std::cout<<"thread exit"<<std::endl;
+                        }));
         }
         return true;
     }
@@ -63,7 +66,8 @@ public:
         _io_service_work = NULL;
 
         for (int i = 0; i < _thread_num; ++i){
-            // don't call io_service.stop() 
+            // must explicitly call stop
+            _io_service.stop();
             _threads[i].join();
         }
     }
