@@ -16,7 +16,7 @@ public:
         : _io_service_pool( s_num, thd_num )
         , m_endpoint( boost::asio::ip::address::from_string(ip_address), stoi(port_num) )
         , m_acceptor(_io_service_pool.get_io_service()) 
-        , is_closed(true)
+        , is_closed(false)
         , session_set(_set){
     }
 
@@ -28,8 +28,8 @@ public:
         if (is_closed.load()){
             return;
         }
-        _io_service_pool.stop();
         is_closed.store(true);
+        _io_service_pool.stop();
         boost::system::error_code ec;
         m_acceptor.cancel(ec);
         if(ec){
