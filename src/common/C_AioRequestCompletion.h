@@ -5,6 +5,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <mutex>
+#include <atomic>
 #include "common/Log.h"
 
 namespace hdcs{
@@ -15,7 +16,7 @@ private:
     callback_t complete_cb;
     void *complete_arg;
     ssize_t ret;
-    bool completed;
+    std::atomic<bool> completed;
     std::condition_variable m_cond;
     std::mutex cond_lock;
 
@@ -29,13 +30,16 @@ public:
     ~C_AioRequestCompletion(){
     }
 
+    void release() {
+      delete this;
+    }
     void complete(ssize_t r){
       ret = r;
       if (complete_cb) {
+        completed = true;
+        m_cond.notify_all();
         complete_cb((void*)this, complete_arg);
       }
-      completed = true;
-      m_cond.notify_all();
     }
 
     ssize_t get_return_value() {
@@ -44,7 +48,7 @@ public:
 
     void wait_for_complete() {
       std::unique_lock<std::mutex> unique_lock(cond_lock);
-      m_cond.wait_for(unique_lock, std::chrono::milliseconds(50), [&]{return completed;});
+      m_cond.wait(unique_lock, [&]{return completed == true;});
     }
 
     void set_reserved_ptr(void* ptr){}
