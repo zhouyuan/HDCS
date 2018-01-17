@@ -27,8 +27,6 @@ inline T atomic_swap(volatile T* lockword, T value)
     return value;
 }
 
-
-
 class AtomicCounter64
 {
 public:
