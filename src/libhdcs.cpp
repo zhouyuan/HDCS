@@ -42,7 +42,7 @@ int libhdcs::hdcs_aio_write(const char* volume_name, const char* data, uint64_t 
 
 extern "C" void hdcs_aio_release(hdcs_completion_t c){
   hdcs::AioCompletion *comp = (hdcs::C_AioRequestCompletion*) c;
-  delete comp;
+  comp->release();
 }
 
 extern "C" void hdcs_aio_wait_for_complete(hdcs_completion_t c){

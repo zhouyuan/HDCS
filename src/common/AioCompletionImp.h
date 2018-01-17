@@ -32,13 +32,9 @@ public:
     }
   }
   ssize_t get_return_value() {};
+  void release() {};
   void wait_for_complete() {
-    if (shared_count > 0) {
-      std::unique_lock<std::mutex> l(cond_lock);
-      while( shared_count > 0 ) {
-        cond.wait_for(l, std::chrono::milliseconds(50));
-      }
-    }
+   cond.wait(l, [&]{return shared_count == 0;});
   };
   void set_reserved_ptr(void* ptr) {
     data = (char*)ptr;
