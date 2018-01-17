@@ -34,6 +34,7 @@ public:
   ssize_t get_return_value() {};
   void release() {};
   void wait_for_complete() {
+   std::unique_lock<std::mutex> l(cond_lock);
    cond.wait(l, [&]{return shared_count == 0;});
   };
   void set_reserved_ptr(void* ptr) {
