@@ -7,6 +7,7 @@
 
 #include "ha/HDCSCoreStatController.h"
 #include "ha/HAConfig.h"
+#include "ha/HACmdHandler.h"
 
 #include <iostream>
 
@@ -39,6 +40,7 @@ public:
   //virtual void apply_domain_map_item (HDCS_DOMAIN_MAP_ITEM domain_map_item) = 0;
   virtual void handle_heartbeat_request (void* session_arg, std::string msg_content) = 0;
   virtual void handle_core_stat_request (void* session_arg, std::string msg_content) = 0;
+  virtual void handle_mgr_request (void* session_arg, std::string msg_content) = 0;
 
   void request_handler (void* session_arg, std::string msg_content) {
     // use different msg handler to handle
@@ -54,7 +56,7 @@ public:
         break;    
       // 3. cmdline
       case HDCS_MSG_CMD:
-
+        handle_mgr_request(session_arg, msg_content);
         break;    
       // 4. core_stat
       case HDCS_MSG_CORE_STAT:
@@ -83,7 +85,7 @@ public:
   networking::server listener;
   name_to_conn_map_t conn_map;
   HAConfig ha_config;
-  //HACmdHandler cmd_handler;
+  HACmdHandler cmd_handler;
 
   //HDCS_GLOBAL_STAT_MAP global_stat_map;
   //HDCS_DOMAIN_MAP global_domain_map;

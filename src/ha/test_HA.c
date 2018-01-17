@@ -16,7 +16,7 @@ int main(int argc, char *argv[]) {
     hdcs::ha::HAClient ha_client;
     std::shared_ptr<hdcs::ha::HDCSCoreStat> stat;
     while (true) {
-      printf("Please input your cmd(connect/add/bye/brk): ");
+      printf("Please input your cmd(connect/add/brk/bye): ");
       std::cin >> cmd;
       if (cmd.compare("bye") == 0) break;
       else if(cmd.compare("connect") == 0) {
@@ -35,13 +35,19 @@ int main(int argc, char *argv[]) {
   if (argv[2][0] == 's') {
     hdcs::ha::HAManager ha_mgr;
     while (true) {
-      printf("Please input your cmd(connect/bye): ");
+      printf("Please input your cmd(connect/disconnect/bye/cmdline): ");
       std::cin >> cmd;
       if (cmd.compare("bye") == 0) break;
       else if(cmd.compare("connect") == 0) {
         printf("Please input server ip and port(ex:127.0.0.1:11001) : ");
         std::cin >> cmd;
         ha_mgr.register_hdcs_node(cmd);
+      } else if(cmd.compare("disconnect") == 0) {
+        printf("Please input server ip and port(ex:127.0.0.1:11001) : ");
+        std::cin >> cmd;
+        ha_mgr.unregister_hdcs_node(cmd);
+      } else {
+        ha_mgr.process_cmd(cmd);
       }
     }
   }

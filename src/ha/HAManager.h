@@ -1,9 +1,6 @@
 #ifndef HDCS_HA_MANAGER_H
 #define HDCS_HA_MANAGER_H
 
-#include "ha/HACore.h"
-#include "common/HeartBeat/HeartBeatService.h"
-#include "ha/HDCSCoreStatController.h"
 #include "common/AioCompletionImp.h"
 #include <iostream>
 
@@ -35,11 +32,17 @@ public:
      //update_node_status(node, HDCS_HEARTBEAT_FAIL);
     }, -1, false);
     hb_worker.register_node(it.first->second, node, err_handler);
+
+    // register to CMDHandler
+    cmd_handler.register_node(node, it.first->second);
   }
 
   void unregister_hdcs_node (std::string node) {
     //unregister from HeartBeat
     hb_worker.unregister_node(node);
+
+    //unregister from CMDHandler
+    cmd_handler.unregister_node(node);
   }
 
   void handle_heartbeat_request (void* session_arg, std::string msg_content) {
@@ -48,6 +51,15 @@ public:
 
   void handle_core_stat_request (void* session_arg, std::string msg_content) {
     core_stat_receiver.request_handler(session_arg, msg_content); 
+  }
+
+  void handle_mgr_request (void* session_arg, std::string msg_content) {
+    cmd_handler.request_handler(session_arg, msg_content);
+  }
+
+  void process_cmd (std::string cmd) {
+    HDCS_CMD_MSG cmd_msg(HDCS_CMD_MSG_CONSOLE, cmd);
+    handle_mgr_request (nullptr, std::move(std::string(cmd_msg.data(), cmd_msg.size())));
   }
 private:
   HeartBeatService hb_worker;

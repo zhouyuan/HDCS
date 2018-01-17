@@ -71,6 +71,10 @@ public:
   void handle_core_stat_request (void* session_arg, std::string msg_content) {
     core_stat_controller.request_handler(session_arg, msg_content); 
   }
+
+  void handle_mgr_request (void* session_arg, std::string msg_content) {
+    cmd_handler.request_handler(session_arg, msg_content, &listener);
+  }
 private:
   HeartBeatService hb_service;
   name_to_conn_map_t conn_map;

@@ -74,11 +74,11 @@ public:
   HDCSCoreStatController():conn(nullptr) {
   }
 
-  HDCSCoreStatController(std::string addr, std::string port) {
+  /*HDCSCoreStatController(std::string addr, std::string port) {
     std::cout << "addr:" << addr << " port:" << port << std::endl;
     conn = new networking::Connection([&](void* p, std::string s){receiver_handler(p, s);}, 1, 1);
     conn->connect(addr, port);
-  }
+  }*/
 
   ~HDCSCoreStatController() {
     if (conn)
@@ -89,12 +89,12 @@ public:
     conn = new_conn;
   }
 
-  int add_listener (std::string port) {
+  /*int add_listener (std::string port) {
     core_stat_listener = new networking::server("0.0.0.0", port, 1, 1);
     core_stat_listener->start([&](void* p, std::string s){request_handler(p, s);});
     core_stat_listener->sync_run();
     return 0;
-  }
+  }*/
 
   std::shared_ptr<HDCSCoreStat> register_core (void* hdcs_core_id) {
     std::shared_ptr<AioCompletion> error_handler = std::make_shared<AioCompletionImp>([&](ssize_t r){
