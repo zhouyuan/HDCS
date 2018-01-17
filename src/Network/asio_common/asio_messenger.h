@@ -76,6 +76,8 @@ private:
         STATUS_CLOSED = 3,
     };
     volatile int _status;
+    AtomicCounter64 send_index; 
+    AtomicCounter64 receive_index;
     //ThreadGroup thread_worker; // post hdcs_handle_request into other io_service.
 
 public:
@@ -207,13 +209,13 @@ public:
         ret=boost::asio::write(socket_, boost::asio::buffer(std::move(msg.to_buffer())), ec);
         send_lock.unlock();
         if(ec){
-            std::cout<<"asio_messenger::sync_send failed: "<<ec.message()<<std::endl;
-            close();
+            error_handing("asio_messenger::sync_send: sending failed", ec);
         }
         if(ret != send_bytes){
             std::cout<<"asio_messenger::sync_send failed: ret != send_bytes "<<std::endl;
             assert(0);
         }
+        ++send_index;
         MsgController* msg_cntl = new MsgController(true); // ture express this msg is sync
         pending_msg_map[_seq_id]=msg_cntl;
         msg_cntl->wait(); // waitting until its ack signal. 
@@ -233,9 +235,9 @@ public:
                         std::cout<<"asio_session::aync_send failed: ret != cb"<<std::endl;
                         assert(0);
                     }
-                }else{
-                    std::cout<<"asio_session::aync_send failed: "<<ec.message()<<std::endl;
-                    close();
+                    ++send_index;
+                }else{ 
+                    error_handing("asio_messenger::async_send: sending failed", ec);
                 }
                 delete send_string;
             });
@@ -248,6 +250,9 @@ public:
         char msg_header[header_len];
         receive_lock.lock();//
         ret = boost::asio::read(socket_, boost::asio::buffer(msg_header, header_len), ec); 
+        if(!ec){
+            error_handing("asio_messenger::sync_receive: receving header failed", ec);
+        }
         if(ret<0){
             std::cout<<"asio_session::sync_receive msg_header failed:  "<<ec.message()<<std::endl;
             return -1;
@@ -260,6 +265,10 @@ public:
         char* receive_buffer = new char[content_size+1]();
         ret = boost::asio::read(socket_, boost::asio::buffer(receive_buffer, content_size), ec); 
         receive_lock.unlock();// 
+        if(!ec){
+            error_handing("asio_messenger::sync_receive: receving content failed", ec);
+        }
+        ++receive_index;
         if(ret<0){
             std::cout<<"asio_session::sync_receive content failed: "<<ec.message()<<std::endl;
             delete[] receive_buffer;
@@ -303,9 +312,9 @@ public:
                         std::cout<<"asio_session::aync_send failed: ret != cb"<<std::endl;
                         assert(0);
                     }
+                    ++send_index;
                 }else{
-                    std::cout<<"asio_session::aync_send failed: "<<ec.message()<<std::endl;
-                    close();
+                    error_handing("asio_messenger::aio_communicate: sending failed", ec);
                 }
             });
     }
@@ -333,6 +342,7 @@ public:
                                     std::cout<<"asio_messenger::async_receive, CRC failed." << std::endl;
                                     assert(0);
                                 }
+                                ++receive_index;
                                 aio_receive();
 
                                 //trigger request handler first
@@ -344,19 +354,13 @@ public:
                                     pending_msg_map.erase(sequence_id);
                                 }
 				//thread_worker.post(boost::bind(c_process_msg, callback_arg, std::move(std::string(data_buffer,content_size))));
-                            }else{ 
-                                if(err != boost::asio::error::eof){
-                                    std::cout<<"asio_messenger::aio_receive firstly receiving failed: "<<err.message()<<std::endl;
-                                }
-                                close();
+                            }else{   
+                                error_handing("asio_messenger::aio_receive: receiving content failed", err);
                             }
  			    delete[] data_buffer;
                         });
                }else{ 
-                   if(err != boost::asio::error::eof){
-                       std::cout<<"asio_message::asio_receive secondly receiving failed: "<<err.message()<<std::endl;
-                   }
-                   close();
+                   error_handing("asio_messenger::aio_receive: receiving header failed", err);
               }
         });
     }
@@ -385,26 +389,46 @@ public:
                                     std::cout<<"asio_messenger::async_receive, CRC failed." << std::endl;
                                     assert(0);
                                 }
+                                ++receive_index;
 				s_process_msg((void*)arg, std::move(std::string(data_buffer,content_size)));
 			        aio_receive(arg);
 				//thread_worker.post(boost::bind(s_process_msg, arg, std::move(std::string(data_buffer,content_size))));
                             }else{ 
-                                if(err != boost::asio::error::eof){
-                                    std::cout<<"asio_messenger::aio_receive firstly receiving failed: "<<err.message()<<std::endl;
-                                }
-                                close();
+                                error_handing("asio_messenger::aio_receive: receiving content failed", err);
                             }
  			    delete[] data_buffer;
                         });
                }else{ 
-                   if(err != boost::asio::error::eof){
-                       std::cout<<"asio_message::asio_receive secondly receiving failed: "<<err.message()<<std::endl;
-                   }
-                   close();
-              }
+                   error_handing("asio_messenger::aio_receive: receiving header failed", err);
+               }
         });
     }
-};
+
+private:
+
+   // will unitfy to encode error, then using switch.
+   // TODO
+   void error_handing(const std::string fail_reason, const boost::system::error_code& err){
+       if(err == boost::asio::error::eof){
+          close();
+          return;
+       }
+       if(err == boost::asio::error::operation_aborted){
+           if(send_index == receive_index){
+               // TODO
+           }else{
+               std::cout<<fail_reason<<" : "<<err.message()<<std::endl;
+           }
+           close();
+           return;
+       }
+       // other error just close socket.
+       std::cout<<fail_reason<<" : "<<err.message()<<std::endl;
+       close();
+       return;
+   }
+
+}; 
 }
 }
 
