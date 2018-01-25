@@ -3,15 +3,20 @@
 
 #include "common/AioCompletionImp.h"
 #include <iostream>
+#include "HDCSDomainMap.h"
 
 namespace hdcs {
 namespace ha {
 
 class HAManager : public HACore{
 public:
-  HAManager (std::string config_path = "") :
+  HAManager (std::string name, std::string config_path = "") :
     HACore(config_path, "10001"),
+    core_stat_receiver(name, &global_domain_map),
+    global_domain_map(get_host_list(), get_replication_count()),
     hb_worker(std::move(HeartBeatOpts(1000000000, 1000000000))){
+      core_stat_receiver.set_host_list(get_host_list());
+      global_domain_map.generate_domain_map();
   }
 
   void register_hdcs_node (std::string node) {
@@ -64,6 +69,7 @@ public:
 private:
   HeartBeatService hb_worker;
   HDCSCoreStatController core_stat_receiver;
+  HDCSDomainMap global_domain_map;
 };
 
 }// ha

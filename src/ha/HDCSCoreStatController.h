@@ -4,6 +4,7 @@
 #include "Network/hdcs_networking.h"
 #include "common/Timer.h"
 #include "ha/HDCSCoreStat.h"
+#include "ha/HDCSDomainMap.h"
 
 namespace hdcs {
 
@@ -15,24 +16,45 @@ typedef uint8_t HDCS_HA_MSG_TYPE;
 #define HDCS_MSG_CORE_STAT  0X32
 #define HDCS_HA_CORE_STAT_UPDATE  0XD2
 
-struct HDCS_CORE_STAT_MSG_T {
+typedef uint8_t HDCS_NODE_STAT_TYPE;
+#define HDCS_HA_NODE_STAT_UP  0XDA
+#define HDCS_HA_NODE_STAT_DOWN  0XDB
+#define HDCS_HA_NODE_STAT_PREP  0XDC
+
+struct HDCS_NODE_STAT_T {
+  HDCS_NODE_STAT_TYPE stat;
+  hdcs_core_stat_map_t hdcs_core_stat_map;
+  HDCS_NODE_STAT_T(): stat(HDCS_HA_NODE_STAT_UP) {
+  }
+};
+
+struct HDCS_CORE_STAT_MSG_HEADER_T {
   HDCS_HA_MSG_TYPE reserved_flag;
+  char node_name[32];
+  HDCS_NODE_STAT_TYPE node_stat;
+};
+
+struct HDCS_CORE_STAT_MSG_T {
+  HDCS_CORE_STAT_MSG_HEADER_T header;
   HDCS_CORE_STAT_T* data;
 };
 
 class HDCS_CORE_STAT_MSG {
 public:
-  HDCS_CORE_STAT_MSG (uint8_t cores_num)
+  HDCS_CORE_STAT_MSG (uint8_t cores_num, HDCS_NODE_STAT_TYPE node_stat, std::string name)
     : cores_num(cores_num),
       data_size(sizeof(HDCS_CORE_STAT_T) * cores_num) {
-    data_ = (char*)malloc (sizeof(HDCS_HA_MSG_TYPE) + data_size);
-    ((HDCS_CORE_STAT_MSG_T*)data_)->reserved_flag = HDCS_MSG_CORE_STAT; 
+    data_ = (char*)malloc (sizeof(HDCS_CORE_STAT_MSG_HEADER_T) + data_size);
+    memset(data_, 0, sizeof(HDCS_CORE_STAT_MSG_HEADER_T) + data_size);
+    ((HDCS_CORE_STAT_MSG_T*)data_)->header.reserved_flag = HDCS_MSG_CORE_STAT; 
+    ((HDCS_CORE_STAT_MSG_T*)data_)->header.node_stat = node_stat; 
+    memcpy(((HDCS_CORE_STAT_MSG_T*)data_)->header.node_name, name.c_str(), name.size()); 
   }
 
   HDCS_CORE_STAT_MSG (std::string msg) {
-    data_size = msg.length() - sizeof(HDCS_HA_MSG_TYPE);
-    data_ = (char*)malloc (sizeof(HDCS_HA_MSG_TYPE) + data_size);
-    memcpy(data_, msg.c_str(), sizeof(HDCS_HA_MSG_TYPE) + data_size);
+    data_size = msg.length() - sizeof(HDCS_CORE_STAT_MSG_HEADER_T);
+    data_ = (char*)malloc (sizeof(HDCS_CORE_STAT_MSG_HEADER_T) + data_size);
+    memcpy(data_, msg.c_str(), sizeof(HDCS_CORE_STAT_MSG_HEADER_T) + data_size);
     cores_num = data_size / sizeof(HDCS_CORE_STAT_T);
     printf("received cores_num: %u\n", cores_num);
   }
@@ -45,21 +67,29 @@ public:
     return cores_num;
   }
 
+  char* get_node_name() {
+    return ((HDCS_CORE_STAT_MSG_T*)data_)->header.node_name;
+  }
+  
+  HDCS_NODE_STAT_TYPE get_node_stat() {
+    return ((HDCS_CORE_STAT_MSG_T*)data_)->header.node_stat;
+  }
+
   char* data() {
     return data_;
   }
 
   uint64_t size() {
-    return sizeof(HDCS_HA_MSG_TYPE) + data_size;
+    return sizeof(HDCS_CORE_STAT_MSG_HEADER_T) + data_size;
   }
 
   void loadline(uint8_t index, HDCS_CORE_STAT_T *stat) {
-    char* stat_data = data_ + sizeof(HDCS_HA_MSG_TYPE);
+    char* stat_data = data_ + sizeof(HDCS_CORE_STAT_MSG_HEADER_T);
     memcpy(stat_data + index, stat, sizeof(HDCS_CORE_STAT_T));
   } 
 
   void readline(uint8_t index, HDCS_CORE_STAT_T *stat) {
-    char* stat_data = data_ + sizeof(HDCS_HA_MSG_TYPE);
+    char* stat_data = data_ + sizeof(HDCS_CORE_STAT_MSG_HEADER_T);
     memcpy(stat, stat_data + index, sizeof(HDCS_CORE_STAT_T));
   } 
 
@@ -71,14 +101,12 @@ private:
 
 class HDCSCoreStatController {
 public:
-  HDCSCoreStatController():conn(nullptr) {
+  HDCSCoreStatController(std::string node_name,
+                         HDCSDomainMap *domain_map = nullptr):
+                         conn(nullptr),
+                         domain_map(domain_map),
+                         node_name(node_name) {
   }
-
-  /*HDCSCoreStatController(std::string addr, std::string port) {
-    std::cout << "addr:" << addr << " port:" << port << std::endl;
-    conn = new networking::Connection([&](void* p, std::string s){receiver_handler(p, s);}, 1, 1);
-    conn->connect(addr, port);
-  }*/
 
   ~HDCSCoreStatController() {
     if (conn)
@@ -89,12 +117,11 @@ public:
     conn = new_conn;
   }
 
-  /*int add_listener (std::string port) {
-    core_stat_listener = new networking::server("0.0.0.0", port, 1, 1);
-    core_stat_listener->start([&](void* p, std::string s){request_handler(p, s);});
-    core_stat_listener->sync_run();
-    return 0;
-  }*/
+  void set_host_list (std::vector<std::string> host_list) {
+    for (auto &host : host_list) {
+      ha_hdcs_node_stat[host] = new HDCS_NODE_STAT_T();
+    }
+  }
 
   std::shared_ptr<HDCSCoreStat> register_core (void* hdcs_core_id) {
     std::shared_ptr<AioCompletion> error_handler = std::make_shared<AioCompletionImp>([&](ssize_t r){
@@ -120,7 +147,7 @@ public:
   }
 
   void send_stat_map() {
-    HDCS_CORE_STAT_MSG msg_content(hdcs_core_stat_map.size());
+    HDCS_CORE_STAT_MSG msg_content(hdcs_core_stat_map.size(), node_stat, node_name);
     uint8_t i = 0;
     for (auto &item : hdcs_core_stat_map) {
       msg_content.loadline(i++, item.second->get_stat());
@@ -138,13 +165,21 @@ public:
       ha_hdcs_core_stat[tmp_stat.hdcs_core_id] = tmp_stat.stat;
     }
 
+    auto it = ha_hdcs_node_stat.find(core_stat_msg.get_node_name());
+    assert (it != ha_hdcs_node_stat.end());
+    it->second->stat = core_stat_msg.get_node_stat();
+    HDCS_DOMAIN_ITEM_TYPE domain_item = domain_map->get_host_domain_item(core_stat_msg.get_node_name());
+    std::cout << "Get domain items: ";
+    domain_map->print(domain_item);
+    std::cout << std::endl;
+
+    //print to console
+    std::cout << "hostname: " << core_stat_msg.get_node_name() <<
+      " status: ";
+    printf("%x\n", core_stat_msg.get_node_stat());
     for (auto &print_stat : ha_hdcs_core_stat) {
       printf("new update    ");
       printf("%x", print_stat.first);
-      /*uint64_t tmp = (uint64_t)(print_stat.first);
-      for (int i = 0; i < sizeof(print_stat.first); i++){
-        printf("%x", ((char*)(&tmp))[i]);
-      }*/
       printf(": %x\n", print_stat.second);
     }
   }
@@ -157,8 +192,14 @@ private:
   hdcs_core_stat_map_t hdcs_core_stat_map;
   networking::Connection* conn;
   networking::server* core_stat_listener;
+  // as client
   std::map<void*, HDCS_CORE_STAT_TYPE> ha_hdcs_core_stat; 
+  HDCS_NODE_STAT_TYPE node_stat;
+  std::string node_name;
 
+  // as server
+  std::map<std::string, HDCS_NODE_STAT_T*> ha_hdcs_node_stat;
+  HDCSDomainMap* domain_map;
 };
 }// ha
 }// hdcs

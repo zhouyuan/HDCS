@@ -68,18 +68,12 @@ public:
     }
   }
 
-  void update_global_stat_map (hdcs_core_stat_map_t stat_map) {
-    // update node status
-    // generate new domain_map
-
-    // distribute domain map
-    /*for (auto &it : global_domain_map) {
-      conn->aio_communicate(domain_item);
-    }*/
+  std::vector<std::string> get_host_list () {
+    return ha_config.get_host_list();
   }
 
-  void generate_domain_map () {
-    // generate domain map by current stat map
+  int get_replication_count () {
+    return stoi(ha_config.get("hdcs_replication_count"));
   }
 
   networking::server listener;

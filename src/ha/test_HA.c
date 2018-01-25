@@ -4,16 +4,16 @@
 #include <iostream>
 
 int main(int argc, char *argv[]) {
-  if (argc == 3) {
+  if (argc == 5) {
   } else {
-   printf("Usage:\n\t%s -r server/client\n\n", argv[0]);
+   printf("Usage:\n\t%s -r server/client -n ${name}\n\n", argv[0]);
    return -1;
   }
 
   std::string cmd;
   std::string node;
   if (argv[2][0] == 'c') {
-    hdcs::ha::HAClient ha_client;
+    hdcs::ha::HAClient ha_client(argv[4]);
     std::shared_ptr<hdcs::ha::HDCSCoreStat> stat;
     while (true) {
       printf("Please input your cmd(connect/add/brk/bye): ");
@@ -33,7 +33,7 @@ int main(int argc, char *argv[]) {
   }
 
   if (argv[2][0] == 's') {
-    hdcs::ha::HAManager ha_mgr;
+    hdcs::ha::HAManager ha_mgr(argv[4]);
     while (true) {
       printf("Please input your cmd(connect/disconnect/bye/cmdline): ");
       std::cin >> cmd;

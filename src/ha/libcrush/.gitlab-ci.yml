@@ -1,0 +1,25 @@
+stages:
+  - build
+  - install
+  - cleanup
+
+build:
+  stage: build
+  script: ./build.sh
+
+install:
+  stage: install
+  script: ./install.sh
+  except:
+    - tags
+
+release:
+  stage: install
+  script: ./release.sh
+  only:
+    - tags
+
+cleanup:
+  stage: cleanup
+  script: ./cleanup.sh
+  when: always

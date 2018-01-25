@@ -12,8 +12,9 @@ namespace ha {
 
 class HAClient : public HACore {
 public:
-  HAClient (std::string config_path = ""):
+  HAClient (std::string name, std::string config_path = ""):
     HACore (config_path, "11001"),
+    core_stat_controller(name),
     hb_service(std::move(HeartBeatOpts(1000000000, 1000000000))) {
   }
 
@@ -30,6 +31,7 @@ public:
 
     // provide this connection to hdcs_core_stat_controller
     core_stat_controller.set_conn(it.first->second);
+    core_stat_controller.send_stat_map();
     printf ("set hdcs_core_stat_controller conn to %p\n", it.first->second);
 
     // clean old conn
