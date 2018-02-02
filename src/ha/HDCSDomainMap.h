@@ -1,7 +1,8 @@
-#ifndef HDCSDOMAINMAP
-#define HDCSDOMAINMAP
+#ifndef HDCSDOMAINMAP_H
+#define HDCSDOMAINMAP_H
 
-#include "CrushMapGenerator.h"
+#include "ha/CrushMapGenerator.h"
+#include "ha/HDCSDomainMapRequestHandler.h"
 #include <iostream>
 
 namespace hdcs {
@@ -28,8 +29,12 @@ public:
     cmap.get(&domain_map);
   } 
 
-  void rm_host (std::string host) {
-    cmap.rm_host(host);
+  void offline_host (std::string host) {
+    cmap.offline_host(host);
+  }
+
+  void online_host (std::string host) {
+    cmap.online_host(host);
   }
 
   void refresh_domain_map () {
@@ -48,6 +53,10 @@ public:
     }
   }
 
+  uint8_t get_replication_count () {
+    return replication_count;
+  }
+
   void print () {
     for (auto &it : domain_map) {
       std::cout << "Host: " << it.first << " -> {";
@@ -63,6 +72,10 @@ public:
       else first = false;
       std::cout << it;
     }
+  }
+
+  void print_host_weights () {
+    cmap.print_weight();
   }
 
 private:

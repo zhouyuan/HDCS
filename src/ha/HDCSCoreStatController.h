@@ -5,6 +5,7 @@
 #include "common/Timer.h"
 #include "ha/HDCSCoreStat.h"
 #include "ha/HDCSDomainMap.h"
+#include <mutex>
 
 namespace hdcs {
 
@@ -102,10 +103,13 @@ private:
 class HDCSCoreStatController {
 public:
   HDCSCoreStatController(std::string node_name,
+                         networking::server* core_stat_listener = nullptr,
                          HDCSDomainMap *domain_map = nullptr):
                          conn(nullptr),
+                         core_stat_listener(core_stat_listener),
                          domain_map(domain_map),
-                         node_name(node_name) {
+                         node_name(node_name),
+                         node_stat(HDCS_HA_NODE_STAT_UP) {
   }
 
   ~HDCSCoreStatController() {
@@ -125,6 +129,8 @@ public:
 
   std::shared_ptr<HDCSCoreStat> register_core (void* hdcs_core_id) {
     std::shared_ptr<AioCompletion> error_handler = std::make_shared<AioCompletionImp>([&](ssize_t r){
+      std::lock_guard<std::mutex> lock(hdcs_stat_mutex);
+      refresh_stat_map();
       send_stat_map();
       printf("one core stat is updated, send out new stat map\n");
     }, -1);
@@ -146,7 +152,33 @@ public:
     return &hdcs_core_stat_map;
   }
 
-  void send_stat_map() {
+  void set_stat_map (std::string host, HDCS_CORE_STAT_TYPE stat) {
+    auto it = ha_hdcs_node_stat.find(host);
+    assert (it != ha_hdcs_node_stat.end());
+    it->second->stat = stat;
+    // update domain map
+    if (it->second->stat == HDCS_HA_NODE_STAT_DOWN) {
+      domain_map->offline_host(host);
+      domain_map->refresh_domain_map();
+    } else if (it->second->stat == HDCS_HA_NODE_STAT_UP) {
+      domain_map->online_host(host);
+      domain_map->refresh_domain_map();
+    }
+  }
+
+  void refresh_stat_map () {
+    bool set_down = false;
+    for (auto &it : hdcs_core_stat_map) {
+      if (it.second->get_stat()->stat == HDCS_CORE_STAT_ERROR) {
+        set_down = true;
+      }
+    }
+    if (set_down) {
+      node_stat = HDCS_HA_NODE_STAT_DOWN;
+    }
+  }
+
+  void send_stat_map () {
     HDCS_CORE_STAT_MSG msg_content(hdcs_core_stat_map.size(), node_stat, node_name);
     uint8_t i = 0;
     for (auto &item : hdcs_core_stat_map) {
@@ -165,27 +197,43 @@ public:
       ha_hdcs_core_stat[tmp_stat.hdcs_core_id] = tmp_stat.stat;
     }
 
+    // set status
     auto it = ha_hdcs_node_stat.find(core_stat_msg.get_node_name());
     assert (it != ha_hdcs_node_stat.end());
-    it->second->stat = core_stat_msg.get_node_stat();
-    HDCS_DOMAIN_ITEM_TYPE domain_item = domain_map->get_host_domain_item(core_stat_msg.get_node_name());
-    std::cout << "Get domain items: ";
-    domain_map->print(domain_item);
-    std::cout << std::endl;
+    if (it->second->stat != core_stat_msg.get_node_stat()) {
+      it->second->stat = core_stat_msg.get_node_stat();
 
-    //print to console
-    std::cout << "hostname: " << core_stat_msg.get_node_name() <<
-      " status: ";
-    printf("%x\n", core_stat_msg.get_node_stat());
-    for (auto &print_stat : ha_hdcs_core_stat) {
-      printf("new update    ");
-      printf("%x", print_stat.first);
-      printf(": %x\n", print_stat.second);
+      // set domain_map
+      if (it->second->stat == HDCS_HA_NODE_STAT_DOWN) {
+        domain_map->offline_host(core_stat_msg.get_node_name());
+        domain_map->refresh_domain_map();
+      }
     }
+
+    // reply with domain map
+    HDCS_DOMAIN_ITEM_TYPE domain_item = domain_map->get_host_domain_item(core_stat_msg.get_node_name());
+    HDCS_DOMAIN_ITEM_MSG domain_item_msg(domain_item);
+    core_stat_listener->send(session_id, std::move(std::string(domain_item_msg.data(), domain_item_msg.size())));
   }
 
   void receiver_handler(void* session_id, std::string msg_content) {
 
+  }
+
+  HDCS_DOMAIN_ITEM_TYPE get_host_domain_item (std::string host) {
+    return domain_map->get_host_domain_item(host);
+  }
+
+  void print() {
+    std::cout << "HDCS Cluster total nodes number: " << ha_hdcs_node_stat.size() << std::endl;
+    std::cout << "=== Node Status ===" << std::endl;
+    for (auto &it : ha_hdcs_node_stat) {
+      std::string stat(it.second->stat == HDCS_HA_NODE_STAT_UP ? "UP" : "DOWN");
+      std::cout << "node name: " << it.first << ", status: " << stat << std::endl;
+    }
+    std::cout << "=== Domain Map Status ===" << std::endl;
+    domain_map->print();
+    domain_map->print_host_weights();
   }
 
 private:
@@ -200,6 +248,7 @@ private:
   // as server
   std::map<std::string, HDCS_NODE_STAT_T*> ha_hdcs_node_stat;
   HDCSDomainMap* domain_map;
+  std::mutex hdcs_stat_mutex;
 };
 }// ha
 }// hdcs

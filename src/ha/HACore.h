@@ -18,14 +18,46 @@ typedef uint8_t HDCS_HA_MSG_TYPE;
 #define HDCS_MSG_CORE_STAT  0X32
 #define HDCS_MSG_DOMAIN_MAP 0X33
 #define HDCS_MSG_CMD        0X34
+#define HDCS_MSG_HA_CONN    0x35
+
+struct HDCS_MSG_HA_CONN_TYPE {
+  HDCS_HA_MSG_TYPE reserved_flag;
+  char node_name[32];
+};
+
+class HDCS_HA_CONN_MSG {
+public:
+  HDCS_HA_CONN_MSG (std::string name) {
+    memset(&data_, 0, sizeof(HDCS_MSG_HA_CONN_TYPE));
+    data_.reserved_flag = HDCS_MSG_HA_CONN;
+    memcpy(data_.node_name, name.c_str(), name.size());
+  }
+
+  ~HDCS_HA_CONN_MSG () {}
+
+  char* data () {
+    return (char*)(&data_);
+  }
+
+  uint64_t size () {
+    return sizeof(HDCS_MSG_HA_CONN_TYPE);
+  }
+
+  std::string get_name () {
+    return std::string(data_.node_name);
+  }
+private:
+  HDCS_MSG_HA_CONN_TYPE data_;
+};
 
 namespace ha {
 
 class HACore {
 public:
-  HACore (std::string config_path, std::string port) :
-    ha_config(config_path),
-    listener("0.0.0.0", port, 1, 1) {
+  HACore (std::string name, HAConfig ha_config) :
+    name(name),
+    ha_config(ha_config),
+    listener("0.0.0.0", ha_config.get_host_port(name), 1, 1) {
     listener.start([&](void* p, std::string s){request_handler(p, s);});
     listener.async_run();
   }
@@ -41,6 +73,8 @@ public:
   virtual void handle_heartbeat_request (void* session_arg, std::string msg_content) = 0;
   virtual void handle_core_stat_request (void* session_arg, std::string msg_content) = 0;
   virtual void handle_mgr_request (void* session_arg, std::string msg_content) = 0;
+  virtual void handle_domain_map_request (void* session_arg, std::string msg_content) = 0;
+  virtual void handle_ha_conn_request (void* session_arg, std::string msg_content) = 0;
 
   void request_handler (void* session_arg, std::string msg_content) {
     // use different msg handler to handle
@@ -52,7 +86,7 @@ public:
         break;    
       // 2. domain map
       case HDCS_MSG_DOMAIN_MAP:
-        //apply_domain_map_item (HDCS_DOMAIN_MAP_ITEM domain_map_item)
+        handle_domain_map_request(session_arg, msg_content);
         break;    
       // 3. cmdline
       case HDCS_MSG_CMD:
@@ -61,7 +95,9 @@ public:
       // 4. core_stat
       case HDCS_MSG_CORE_STAT:
         handle_core_stat_request(session_arg, msg_content);
-        //update_global_stat_map(core_stat_controller.get_stat_map());
+        break;    
+      case HDCS_MSG_HA_CONN:
+        handle_ha_conn_request(session_arg, msg_content);
         break;    
       default:
         break;
@@ -80,9 +116,7 @@ public:
   name_to_conn_map_t conn_map;
   HAConfig ha_config;
   HACmdHandler cmd_handler;
-
-  //HDCS_GLOBAL_STAT_MAP global_stat_map;
-  //HDCS_DOMAIN_MAP global_domain_map;
+  std::string name;
 };
 }// ha
 }// hdcs

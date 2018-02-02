@@ -79,13 +79,29 @@ public:
     }
   }
 
-  void rm_host (std::string host_id) {
+  void offline_host (std::string host_id) {
     auto it = host_map.find(host_id);
     if (it == host_map.end()) {
       return;
     }
     int host_index = it->second->host_index;
     weights[host_index] = 0x00000;
+  }
+
+  void print_weight () {
+    for (auto& it : host_map) {
+      int weight = weights[it.second->host_index];
+      std::cout << "host name: " << it.first << ", weight: 0X" << std::hex << weight << std::endl;
+    }
+  }
+
+  void online_host (std::string host_id) {
+    auto it = host_map.find(host_id);
+    if (it == host_map.end()) {
+      return;
+    }
+    int host_index = it->second->host_index;
+    weights[host_index] = 0x10000;
   }
 
 private:
@@ -175,8 +191,9 @@ private:
                                cwin, //crush workspace
                                NULL);
 
+    domain_item->resize(result_len + 1);
     for (auto &it : host_map) {
-      for (int i = 0; i < replication_count; i++){
+      for (int i = 0; i < result_len + 1; i++){
         if (it.second->host_index == result[i]) {
           domain_item->at(i) = it.first;
         }

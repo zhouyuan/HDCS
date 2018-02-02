@@ -29,17 +29,17 @@ int main () {
   domain_map.print();
 
   printf("Remove host 14\n");
-  domain_map.rm_host("host14");
+  domain_map.online_host("host14");
   domain_map.refresh_domain_map();
   domain_map.print();
 
   printf("Remove host 03\n");
-  domain_map.rm_host("host03");
+  domain_map.online_host("host03");
   domain_map.refresh_domain_map();
   domain_map.print();
 
   printf("Remove host 17\n");
-  domain_map.rm_host("host17");
+  domain_map.online_host("host17");
   domain_map.refresh_domain_map();
   domain_map.print();
   return 0;

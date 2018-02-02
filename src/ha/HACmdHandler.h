@@ -68,6 +68,10 @@ public:
   ~HACmdHandler() {
   }
 
+  void set_core_stat(HDCSCoreStatController* hdcs_core_stat) {
+    core_stat = hdcs_core_stat;
+  }
+
   void register_node (std::string node, networking::Connection* new_conn) {
     hdcs_node_map[node] = new_conn;
   }
@@ -82,9 +86,13 @@ public:
       case HDCS_CMD_MSG_CONSOLE:
       {
         std::cout << "HA Manager received CMD is: " << cmd_msg.get_cmd() << std::endl;
-        HDCS_CMD_MSG msg_content(HDCS_CMD_MSG_REQUEST, cmd_msg.get_cmd());
-        for (auto &it : hdcs_node_map) {
-          it.second->aio_communicate(std::move(std::string(msg_content.data(), msg_content.size())));
+        if (cmd_msg.get_cmd().compare("get_status") == 0) {
+          core_stat->print();
+        } else {
+          HDCS_CMD_MSG msg_content(HDCS_CMD_MSG_REQUEST, cmd_msg.get_cmd());
+          for (auto &it : hdcs_node_map) {
+            it.second->aio_communicate(std::move(std::string(msg_content.data(), msg_content.size())));
+          }
         }
         break;
       }
@@ -113,6 +121,7 @@ public:
 
 private:
   std::map<std::string, networking::Connection*> hdcs_node_map;
+  HDCSCoreStatController* core_stat;
 };
 }// ha
 }// hdca
