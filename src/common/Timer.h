@@ -32,6 +32,7 @@ public:
   }
   ~SafeTimer() {
     go = false;
+    cond.notify_all();
     process_thread->join();
     delete process_thread;
   }
