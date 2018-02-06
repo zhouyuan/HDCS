@@ -100,7 +100,7 @@ public:
   }
 
   void handle_mgr_request (void* session_arg, std::string msg_content) {
-    cmd_handler.request_handler(session_arg, msg_content);
+    cmd_handler.request_handler(session_arg, msg_content, &listener);
   }
 
   void handle_domain_map_request (void* session_arg, std::string msg_content) {

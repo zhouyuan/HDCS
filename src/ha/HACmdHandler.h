@@ -1,6 +1,7 @@
 #ifndef HACMDHANDLER_H
 #define HACMDHANDLER_H
 
+#include "ha/HDCSCoreStatController.h"
 namespace hdcs {
 namespace ha {
 typedef uint8_t HDCS_HA_MSG_TYPE;
@@ -9,6 +10,7 @@ typedef uint8_t HDCS_CMD_MSG_TYPE;
 #define HDCS_CMD_MSG_REQUEST 0XC0
 #define HDCS_CMD_MSG_REPLY 0XC1
 #define HDCS_CMD_MSG_CONSOLE 0XC2
+#define HDCS_CMD_MSG_CONSOLE_REPLY 0XC3
 
 struct HDCS_CMD_MSG_T {
   HDCS_HA_MSG_TYPE reserved_flag;
@@ -20,7 +22,7 @@ class HDCS_CMD_MSG {
 public:
   HDCS_CMD_MSG (HDCS_CMD_MSG_TYPE type, std::string cmd):
     header_size(sizeof(HDCS_HA_MSG_TYPE) + sizeof(HDCS_CMD_MSG_TYPE)) {
-    data_size = cmd.length();
+    data_size = cmd.size();
     data_ = (char*)malloc (header_size + data_size);
     ((HDCS_CMD_MSG_T*)data_)->reserved_flag = HDCS_MSG_CMD; 
     ((HDCS_CMD_MSG_T*)data_)->type = type; 
@@ -29,7 +31,7 @@ public:
 
   HDCS_CMD_MSG (std::string msg_content):
     header_size(sizeof(HDCS_HA_MSG_TYPE) + sizeof(HDCS_CMD_MSG_TYPE)) {
-    data_size = msg_content.length() - header_size;
+    data_size = msg_content.size() - header_size;
     data_ = (char*)malloc (header_size + data_size);
     memcpy(data_, msg_content.c_str(), header_size + data_size);
   }
@@ -56,7 +58,7 @@ public:
 
 private:
   char* data_;
-  uint8_t data_size;
+  uint32_t data_size;
   uint8_t header_size;
 };
 
@@ -87,7 +89,9 @@ public:
       {
         std::cout << "HA Manager received CMD is: " << cmd_msg.get_cmd() << std::endl;
         if (cmd_msg.get_cmd().compare("get_status") == 0) {
-          core_stat->print();
+          std::string reply = core_stat->printToString();
+          HDCS_CMD_MSG msg_content(HDCS_CMD_MSG_CONSOLE_REPLY, reply);
+          listener->send(session_id, std::move(std::string(msg_content.data(), msg_content.size())));
         } else {
           HDCS_CMD_MSG msg_content(HDCS_CMD_MSG_REQUEST, cmd_msg.get_cmd());
           for (auto &it : hdcs_node_map) {
@@ -106,6 +110,8 @@ public:
       case HDCS_CMD_MSG_REPLY:
       {
         std::cout << "HA Manager received CMD REPLY is: " << cmd_msg.get_cmd() << std::endl;
+        HDCS_CMD_MSG msg_content(HDCS_CMD_MSG_CONSOLE_REPLY, cmd_msg.get_cmd());
+        listener->send(session_id, std::move(std::string(msg_content.data(), msg_content.size())));
         break;
       }
       default:

@@ -224,16 +224,18 @@ public:
     return domain_map->get_host_domain_item(host);
   }
 
-  void print() {
-    std::cout << "HDCS Cluster total nodes number: " << ha_hdcs_node_stat.size() << std::endl;
-    std::cout << "=== Node Status ===" << std::endl;
+  std::string printToString() {
+    std::stringstream ss;
+    ss << "HDCS Cluster total nodes number: " << ha_hdcs_node_stat.size() << std::endl;
+    ss << "=== Node Status ===" << std::endl;
     for (auto &it : ha_hdcs_node_stat) {
       std::string stat(it.second->stat == HDCS_HA_NODE_STAT_UP ? "UP" : "DOWN");
-      std::cout << "node name: " << it.first << ", status: " << stat << std::endl;
+      ss << "node name: " << it.first << ", status: " << stat << std::endl;
     }
-    std::cout << "=== Domain Map Status ===" << std::endl;
-    domain_map->print();
-    domain_map->print_host_weights();
+    ss << "=== Domain Map Status ===" << std::endl;
+    ss << domain_map->printToString();
+    ss << domain_map->printToString_host_weights();
+    return ss.str();
   }
 
 private:
