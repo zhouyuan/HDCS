@@ -347,13 +347,16 @@ public:
                                 aio_receive();
 
                                 //trigger request handler first
-				c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
+				                        c_process_msg(callback_arg, std::move(std::string(data_buffer, content_size)));
                                 if(pending_msg_map.size()!=0){
                                     pending_msg_map_lock.lock();
                                     // lock? TODO
-                                    pending_msg_map[sequence_id]->Done();
-                                    delete pending_msg_map[sequence_id];
-                                    pending_msg_map.erase(sequence_id);
+                                    auto it = pending_msg_map.find(sequence_id);
+                                    assert(it != pending_msg_map.end());
+                                    it->second->Done();
+                                    auto tmp_ptr = it->second;
+                                    pending_msg_map.erase(it);
+                                    delete tmp_ptr;
                                     pending_msg_map_lock.unlock();
                                 }
 				//thread_worker.post(boost::bind(c_process_msg, callback_arg, std::move(std::string(data_buffer,content_size))));
