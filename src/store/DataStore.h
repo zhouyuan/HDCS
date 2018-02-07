@@ -1,6 +1,7 @@
 // Copyright [2017] <Intel>
 #ifndef HDCS_DATA_STORE_H
 #define HDCS_DATA_STORE_H
+#include <string>
 #include <stdint.h>
 #include "common/AioCompletion.h"
 
@@ -12,6 +13,14 @@ typedef uint32_t BLOCK_STATUS_TYPE;
 
   class DataStore {
   public:
+    DataStore() {}
+    virtual ~DataStore() {}
+
+    static DataStore* create_engine(const std::string engine_type,
+                                    const std::string store_path,
+                                    const uint64_t total_size,
+                                    const uint64_t store_size,
+                                    const uint64_t block_size);
     virtual int write(char* data, uint64_t offset, uint64_t size) = 0;
     virtual int read(char* data, uint64_t offset, uint64_t size) = 0;
     virtual int aio_write(char* data, uint64_t offset, uint64_t size, AioCompletion* on_finish) = 0;
