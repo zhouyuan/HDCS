@@ -23,11 +23,11 @@ all: $(DIST_LIB) $(CONTROLLER) $(TEST_TOOL)
 %.o : %.c
 	${CC} -c ${CCFLAGS} ${INCS} $< -o $@
 
-COMMON_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o HDCSController.o store/KVStore/KVStore.o store/DataStore.o
-LIB_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o
+COMMON_OBJECTS:= HDCSController.o
+LIB_OBJECTS:= store/SimpleStore/SimpleBlockStore.o core/policy/CachePolicy.o core/policy/TierPolicy.o core/HDCSCore.o store/KVStore/KVStore.o store/DataStore.o
 RBD_OBJECTS:= store/RBD/RBDImageStore.o 
 
-$(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS)
+$(CONTROLLER): $(COMMON_OBJECTS) $(RBD_OBJECTS) ${LIB_OBJECTS}
 	${CXX} ${CXXFLAGS} ${INCS} HDCS.cpp -o $@ $^ ${PLATFORM_LDFLAGS}
 
 $(DIST_LIB): $(LIB_OBJECTS) $(RBD_OBJECTS)

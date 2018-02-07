@@ -6,6 +6,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 set(CMAKE_CXX_COMPILER g++)
 set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-std=c++11 -O2 -g -pthread")
+#set(CMAKE_SHARED_LINKER_FLAGS "-Wl,-whole-archive")
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/src/common)
@@ -21,6 +22,8 @@ set(hdcs_internal_src
     ${HDCS_SRC_DIR}/core/policy/TierPolicy.cpp
     ${HDCS_SRC_DIR}/HDCSController.cpp
     ${HDCS_SRC_DIR}/store/SimpleStore/SimpleBlockStore.cpp
+    ${HDCS_SRC_DIR}/store/DataStore.cpp
+    ${HDCS_SRC_DIR}/store/KVStore/KVStore.cpp
     ${HDCS_SRC_DIR}/store/RBD/RBDImageStore.cpp
     )
 
@@ -28,6 +31,8 @@ add_library(hdcs SHARED
     ${hdcs_internal_src}
     ${HDCS_SRC_DIR}/libhdcs.cpp
     )
+
+target_link_libraries(hdcs ${PROJECT_SOURCE_DIR}/deps/src/hlkvds/src/libhlkvds.a boost_thread boost_system boost_program_options rados rbd)
 
 add_executable(HDCS
     ${HDCS_SRC_DIR}/HDCS.cpp
@@ -93,3 +98,12 @@ enable_testing()
 
 # define a test
 add_test(unit ${PROJECT_BINARY_DIR}/unit_tests)
+
+
+add_custom_target(
+    hlkvds
+    COMMAND cd deps/src/hlkvds && make clean && make
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    )
+add_dependencies(hlkvds update_submodules)
+add_dependencies(hdcs hlkvds)
