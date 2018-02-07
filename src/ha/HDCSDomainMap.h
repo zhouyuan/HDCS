@@ -4,6 +4,7 @@
 #include "ha/CrushMapGenerator.h"
 #include "ha/HDCSDomainMapRequestHandler.h"
 #include <iostream>
+#include <sstream>
 
 namespace hdcs {
 namespace ha {
@@ -57,25 +58,29 @@ public:
     return replication_count;
   }
 
-  void print () {
+  std::string printToString () {
+    std::stringstream ss;
     for (auto &it : domain_map) {
-      std::cout << "Host: " << it.first << " -> {";
-      print (it.second);
-      std::cout << "}" << std::endl;
+      ss << "Host: " << it.first << " -> {";
+      ss << printToString(it.second);
+      ss << "}" << std::endl;
     }
+    return ss.str();
   }
 
-  void print (HDCS_DOMAIN_ITEM_TYPE domain_item) {
+  std::string printToString (HDCS_DOMAIN_ITEM_TYPE domain_item) {
+    std::stringstream ss;
     bool first = true;
     for (auto &it : domain_item) {
-      if (!first) std::cout << ", ";
+      if (!first) ss << ", ";
       else first = false;
-      std::cout << it;
+      ss << it;
     }
+    return ss.str();
   }
 
-  void print_host_weights () {
-    cmap.print_weight();
+  std::string printToString_host_weights () {
+    return cmap.printToString_weight();
   }
 
 private:

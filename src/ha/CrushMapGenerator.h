@@ -88,11 +88,13 @@ public:
     weights[host_index] = 0x00000;
   }
 
-  void print_weight () {
+  std::string printToString_weight () {
+    std::stringstream ss;
     for (auto& it : host_map) {
       int weight = weights[it.second->host_index];
-      std::cout << "host name: " << it.first << ", weight: 0X" << std::hex << weight << std::endl;
+      ss << "host name: " << it.first << ", weight: 0X" << std::hex << weight << std::endl;
     }
+    return ss.str();
   }
 
   void online_host (std::string host_id) {
