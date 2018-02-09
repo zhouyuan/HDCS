@@ -18,20 +18,121 @@
 
 namespace hdcs {
 
-struct hdcs_repl_options {
-  hdcs_repl_options(std::string role, std::string replication_nodes): role(role), replication_nodes(replication_nodes){};
-  std::string role;
-  std::string replication_nodes;
-};
-
-
 class Config{
 
 public:
-    typedef std::map<std::string, std::string> ConfigInfo;
-    ConfigInfo configValues{
+  typedef std::map<std::string, std::string> ConfigInfo;
+  Config(std::string name, std::string config_name="/etc/hdcs/general.conf"): name(name) {
+      const std::string cfg_file = config_name;
+      try {
+          boost::property_tree::ini_parser::read_ini(cfg_file, pt);
+      } catch(const std::exception &exc) {
+          std::cout << "error when reading: " << cfg_file
+                    << ", error: " << exc.what() << std::endl;
+          // assume general.conf should be created by admin manually
+      }
+
+      //print config
+      //printTree(pt, 0);
+  }
+
+  ~Config(){
+  }
+
+  std::string indent(int level) {
+    std::string s; 
+    for (int i=0; i<level; i++) s += "  ";
+    return s; 
+  } 
+  
+  void printTree (boost::property_tree::ptree &pt, int level) {
+    if (pt.empty()) {
+      std::cout << "\""<< pt.data()<< "\"";
+    }
+  
+    else {
+      if (level) std::cout << std::endl; 
+  
+      std::cout << indent(level) << "{" << std::endl;     
+  
+      for (boost::property_tree::ptree::iterator pos = pt.begin(); pos != pt.end();) {
+        std::cout << indent(level+1) << "\"" << pos->first << "\": "; 
+  
+        printTree(pos->second, level + 1); 
+        ++pos; 
+        if (pos != pt.end()) {
+          std::cout << ","; 
+        }
+        std::cout << std::endl;
+      } 
+  
+     std::cout << indent(level) << " }";     
+    }
+  
+    return; 
+  }
+
+  ConfigInfo get_config (std::string type = "HDCSCore") {
+
+    if (type.compare("HDCSManager") == 0) {
+      ConfigInfo configValues{
+        {"hdcs_HAManager_name", "HDCSManager"},
+        {"ha_heartbeat_listen_port", "10000"},
+        {"hdcs_replication_count", "3"},
+        {"status_check_timeout", "30000000000"},
+        {"layback_domain_distribute_timeout", "10000000000"},
+      };
+      std::string s;
+      for (ConfigInfo::const_iterator it = configValues.begin(); it!=configValues.end(); it++) {
+          try {
+              s = pt.get<std::string>("global." + it->first);
+          } catch(...) {
+              continue;
+          }
+          if (s != "") {
+              configValues[it->first] = s;
+          }
+          s = "";
+      }
+      //generate host list
+      std::string host_list = "";
+      for (boost::property_tree::ptree::iterator pos = pt.begin(); pos != pt.end(); pos++) {
+        if (pos->first != "global") {
+          if (host_list.size() == 0)
+            host_list = pos->first;
+          else
+            host_list += "," + pos->first;
+          configValues[pos->first] = pt.get<std::string>(pos->first + ".addr");
+        }
+      }
+      configValues["hdcs_host_list"] = host_list;
+      for (auto &it : configValues) {
+          std::cout << it.first << " : " << it.second << std::endl;
+      }
+      return configValues;
+    } else if (type.compare("HDCSController") == 0) {
+      ConfigInfo configValues{
         {"cfg_file_path","/etc/hdcs/general.conf"},
         {"log_to_file","false"},
+      };
+      std::string s;
+      for (ConfigInfo::const_iterator it = configValues.begin(); it!=configValues.end(); it++) {
+          try {
+              s = pt.get<std::string>("global." + it->first);
+          } catch(...) {
+              continue;
+          }
+          if (s != "") {
+              configValues[it->first] = s;
+          }
+          s = "";
+      }
+      for (auto &it : configValues) {
+          std::cout << it.first << " : " << it.second << std::endl;
+      }
+      return configValues;
+    } else if (type.compare("HDCSCore") == 0) {
+      ConfigInfo configValues{
         {"rbd_pool_name","rbd"},
         {"rbd_volume_name","volume_1"},
         {"cache_dir","/tmp/"},
@@ -44,60 +145,39 @@ public:
         {"cache_min_alloc_size","4096"},
         {"op_threads_num","64"},
         {"engine_type","simple"},
-    };
-    Config(std::string name, struct hdcs_repl_options replication_options, std::string config_name="/etc/hdcs/general.conf"){
+      };
+      //scan global section, overwrite default config
+      std::string s;
+      for (ConfigInfo::const_iterator it = configValues.begin(); it!=configValues.end(); it++) {
+          try {
+              s = pt.get<std::string>("global." + it->first);
+          } catch(...) {
+              continue;
+          }
+          if (s != "") {
+              configValues[it->first] = s;
+          }
+          s = "";
+      }
 
-        const std::string cfg_file = config_name;
-        boost::property_tree::ptree pt;
-        try {
-            boost::property_tree::ini_parser::read_ini(cfg_file, pt);
-        } catch(...) {
-            std::cout << "error when reading: " << cfg_file
-                      << ", config file for missing?" << std::endl;
-            // assume general.conf should be created by admin manually
-            assert(0);
-        }
-        configValues["cfg_file_path"] = cfg_file;
+      configValues["rbd_volume_name"] = name;
+      configValues["cache_dir_dev"] = configValues["cache_dir"] + "/" + name + "_cache.data";
+      configValues["cache_dir_meta"] = configValues["cache_dir"] + "/" + name + "_meta";
+      configValues["cache_dir_run"] = configValues["cache_dir"] + "/" + name + "_run";
 
-        std::string s;
-        //scan global section, overwrite default config
-        for (ConfigInfo::const_iterator it = configValues.begin(); it!=configValues.end(); it++) {
-            try {
-                s = pt.get<std::string>("global." + it->first);
-            } catch(...) {
-                continue;
-            }
-            if (s != "") {
-                configValues[it->first] = s;
-            }
-            s = "";
-        }
-
-        // accept role from cmdline
-        // if role is not master/slave, then assert
-        if ("master" == replication_options.role) {
-          configValues["role"] = "hdcs_master";
-          configValues["replication_nodes"] = replication_options.replication_nodes;
-        } else if ("slave" == replication_options.role) {
-          configValues["role"] = "hdcs_replica";
-          configValues["replication_nodes"] = "";
-        } else {
-          assert(0);
-        }
-
-        configValues["rbd_volume_name"] = name;
-        configValues["cache_dir_dev"] = configValues["cache_dir"] + "/" + name + "_cache.data";
-        configValues["cache_dir_meta"] = configValues["cache_dir"] + "/" + name + "_meta";
-        configValues["cache_dir_run"] = configValues["cache_dir"] + "/" + name + "_run";
-
-        for (auto &it : configValues) {
-            std::cout << it.first << " : " << it.second << std::endl;
-
-        }
+      for (auto &it : configValues) {
+          std::cout << it.first << " : " << it.second << std::endl;
+      }
+      return configValues;
     }
-    ~Config(){
-    }
+    ConfigInfo tmp;
+    return tmp; 
+  }
+private:
+  std::string name;
+  boost::property_tree::ptree pt;
 };
+
 
 }
 

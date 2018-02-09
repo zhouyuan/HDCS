@@ -17,6 +17,12 @@
 #include <string>
 
 namespace hdcs {
+  struct hdcs_repl_options {
+    hdcs_repl_options(std::string role, std::string replication_nodes): role(role), replication_nodes(replication_nodes){};
+    std::string role;
+    std::string replication_nodes;
+  };
+
 namespace core {
   class HDCSCore {
   public:
@@ -44,6 +50,8 @@ namespace core {
     class WordDelimitedBy : public std::string {};
     std::mutex replication_core_map_mutex;
     hdcs_replica_nodes_t replication_core_map;
+    hdcs_repl_options replication_options;
+    std::string name;
 
     void process();
     void process_request(std::shared_ptr<Request> req);

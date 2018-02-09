@@ -14,10 +14,14 @@
 
 namespace hdcs {
 namespace core {
-HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_options replication_options) {
-  config = new Config(name, replication_options, cfg_file);
+HDCSCore::HDCSCore(std::string name,
+  std::string cfg_file,
+  hdcs_repl_options replication_options):
+  name(name),
+  replication_options(replication_options) {
+  config = new Config(name, cfg_file);
 
-  std::string log_path = config->configValues["log_to_file"];
+  std::string log_path = config->get_config("HDCSCore")["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
   if( log_path!="false" ){
     int stderr_no = dup(fileno(stderr));
@@ -26,15 +30,15 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
     if(-1==dup2(fileno(log_fd), STDERR_FILENO)){}
   }
 
-  int hdcs_thread_max = stoi(config->configValues["op_threads_num"]);
+  int hdcs_thread_max = stoi(config->get_config("HDCSCore")["op_threads_num"]);
   hdcs_op_threads = new TWorkQueue(hdcs_thread_max);
-  uint64_t total_size = stoull(config->configValues["total_size"]);
-  uint64_t block_size = stoull(config->configValues["cache_min_alloc_size"]);
-  bool cache_policy_mode = config->configValues["policy_mode"].compare(std::string("cache")) == 0 ? true : false;
+  uint64_t total_size = stoull(config->get_config("HDCSCore")["total_size"]);
+  uint64_t block_size = stoull(config->get_config("HDCSCore")["cache_min_alloc_size"]);
+  bool cache_policy_mode = config->get_config("HDCSCore")["policy_mode"].compare(std::string("cache")) == 0 ? true : false;
 
-  std::string engine_type = config->configValues["entine_type"];
-  std::string path = config->configValues["cache_dir_run"];
-  std::string pool_name = config->configValues["rbd_pool_name"];
+  std::string engine_type = config->get_config("HDCSCore")["entine_type"];
+  std::string path = config->get_config("HDCSCore")["cache_dir_run"];
+  std::string pool_name = config->get_config("HDCSCore")["rbd_pool_name"];
   std::string volume_name = name;
 
   //connect to its replication_nodes
@@ -49,10 +53,10 @@ HDCSCore::HDCSCore(std::string name, std::string cfg_file, struct hdcs_repl_opti
   store::DataStore* datastore = nullptr;
 
   if (cache_policy_mode) {
-    uint64_t cache_size = stoull(config->configValues["cache_total_size"]);
-    float cache_ratio_health = stof(config->configValues["cache_ratio_health"]);
-    uint64_t timeout_nanosecond = stoull(config->configValues["cache_dirty_timeout_nanoseconds"]);
-    CACHE_MODE_TYPE cache_mode = config->configValues["cache_mode"].compare(std::string("readonly")) == 0 ? CACHE_MODE_READ_ONLY : CACHE_MODE_WRITE_BACK;
+    uint64_t cache_size = stoull(config->get_config("HDCSCore")["cache_total_size"]);
+    float cache_ratio_health = stof(config->get_config("HDCSCore")["cache_ratio_health"]);
+    uint64_t timeout_nanosecond = stoull(config->get_config("HDCSCore")["cache_dirty_timeout_nanoseconds"]);
+    CACHE_MODE_TYPE cache_mode = config->get_config("HDCSCore")["cache_mode"].compare(std::string("readonly")) == 0 ? CACHE_MODE_READ_ONLY : CACHE_MODE_WRITE_BACK;
     policy = new CachePolicy(total_size, cache_size, block_size, block_ptr_map,
                       datastore->create_engine(engine_type, path, total_size, cache_size, block_size),
                       new store::RBDImageStore(pool_name, volume_name, block_size),
@@ -182,14 +186,13 @@ void HDCSCore::aio_write (char* data, uint64_t offset, uint64_t length,  void* a
 }
 
 void HDCSCore::connect_to_replica (std::string name) {
-  assert("hdcs_master" == config->configValues["role"]);
   std::string addr;
   std::string port;
   int colon_pos, last_pos;
   char c;
 
   hdcs_ioctx_t* io_ctx;
-  std::string iss(config->configValues["replication_nodes"]);
+  std::string iss(replication_options.replication_nodes);
   boost::erase_all(iss, " ");
   std::vector<std::string> replication_nodes;
   boost::split(replication_nodes, iss, boost::is_any_of(","));

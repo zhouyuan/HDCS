@@ -2,9 +2,15 @@
 #include "HDCSController.h"
 
 namespace hdcs {
-HDCSController::HDCSController(struct hdcs_repl_options repl_opt, std::string config_name): replication_options(repl_opt), config_name(config_name) {
-  config = new Config("", replication_options, config_name);
-  std::string log_path = config->configValues["log_to_file"];
+HDCSController::HDCSController(
+  std::string name,
+  std::string config_file_path,
+  std::string role):
+  name(name),
+  config_file_path(config_file_path),
+  role(role),
+  config(name, config_file_path) {
+  std::string log_path = config.get_config("HDCSController")["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
   if( log_path!="false" ){
     int stderr_no = dup(fileno(stderr));
@@ -14,9 +20,14 @@ HDCSController::HDCSController(struct hdcs_repl_options repl_opt, std::string co
   }
 
   std::string _port = "9000";
-  if ("hdcs_replica" == config->configValues["role"]) {
+  if (role.compare("slave") == 0) {
     _port = "9001";
   }
+
+  //setup HAClient
+  hdcs::ha::HAConfig ha_config(config.get_config("HDCSManager"));
+  ha_client = new ha::HAClient(name, std::move(ha_config));
+  ha_client->add_ha_server(config.get_config("HDCSManager")["hdcs_HAManager_name"]);
 
   //TODO(): seperate public/cluster network
   network_service = new networking::server("0.0.0.0", _port, 16, 5);
@@ -26,6 +37,7 @@ HDCSController::HDCSController(struct hdcs_repl_options repl_opt, std::string co
 }
 
 HDCSController::~HDCSController() {
+  delete ha_client;
   delete network_service;
   for (auto it = hdcs_core_map.begin(); it != hdcs_core_map.end(); it++) {
     delete (it->second);
@@ -42,10 +54,13 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
     case HDCS_CONNECT:
     {
       std::string name(data, io_ctx->length);
+
       hdcs_core_map_mutex.lock();
       auto it = hdcs_core_map.find(name);
       if (it == hdcs_core_map.end()) {
-        core::HDCSCore* core_inst = new core::HDCSCore(name, config->configValues["cfg_file_path"], replication_options);
+        //get replication_options from HDCSManager
+        hdcs_repl_options replication_options(role, ha_client->printToString_domain_item());
+        core::HDCSCore* core_inst = new core::HDCSCore(name, config_file_path, replication_options);
         auto ret = hdcs_core_map.insert(std::pair<std::string, core::HDCSCore*>(name, core_inst));
         assert (ret.second);
         it = ret.first;
