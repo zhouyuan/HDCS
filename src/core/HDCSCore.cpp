@@ -14,16 +14,18 @@
 
 namespace hdcs {
 namespace core {
-HDCSCore::HDCSCore(std::string name,
+HDCSCore::HDCSCore(std::string host, std::string name,
   std::string cfg_file,
-  hdcs_repl_options replication_options):
+  hdcs_repl_options &&replication_options_param):
+  host(host),
   name(name),
-  replication_options(replication_options) {
-  config = new Config(name, cfg_file);
+  replication_options(replication_options_param) {
+  config = new Config(host + "_" + name, cfg_file);
 
   std::string log_path = config->get_config("HDCSCore")["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
   if( log_path!="false" ){
+    log_path = "hdcs_" + name + ".log";
     int stderr_no = dup(fileno(stderr));
     log_fd = fopen( log_path.c_str(), "w" );
 	  if(log_fd==NULL){}
@@ -42,8 +44,14 @@ HDCSCore::HDCSCore(std::string name,
   std::string volume_name = name;
 
   //connect to its replication_nodes
-  if ("master" == replication_options.role && replication_options.replication_nodes != "") {
-    connect_to_replica(name);
+  std::cout << "replication_options.role : " << replication_options.role << std::endl; 
+  std::cout << "replication_options.nodes : ";
+  for (auto &it :  replication_options.replication_nodes) {
+    std::cout << it << ",";
+  }
+  std::cout << std::endl; 
+  if ("master" == replication_options.role && replication_options.replication_nodes.size() != 0) {
+    connect_to_replica(replication_options.replication_nodes);
   }
 
   block_guard = new BlockGuard(total_size, block_size,
@@ -114,19 +122,7 @@ void HDCSCore::process() {
   while(go){
     std::shared_ptr<Request> req = request_queue.dequeue();
     if (req != nullptr) {
-      //TODO: add TS;
-      if (req->offset == 871018496) {
-      struct timespec spec;
-      clock_gettime(CLOCK_REALTIME, &spec);
-      fprintf(stderr, "%lu: hdcs dequeue %lu - %lu\n", (spec.tv_sec * 1000000000L + spec.tv_nsec), req->offset, req->offset + req->length);
-      }
       process_request(req);
-      //TODO: add TS;
-      if (req->offset == 871018496) {
-      struct timespec spec;
-      clock_gettime(CLOCK_REALTIME, &spec);
-      fprintf(stderr, "%lu: hdcs complete process_request %lu - %lu\n", (spec.tv_sec * 1000000000L + spec.tv_nsec), req->offset, req->offset + req->length);
-      }
     }
   }
 }
@@ -185,18 +181,13 @@ void HDCSCore::aio_write (char* data, uint64_t offset, uint64_t length,  void* a
   //process_request(req);
 }
 
-void HDCSCore::connect_to_replica (std::string name) {
+void HDCSCore::connect_to_replica (std::vector<std::string> replication_nodes) {
   std::string addr;
   std::string port;
   int colon_pos, last_pos;
   char c;
 
   hdcs_ioctx_t* io_ctx;
-  std::string iss(replication_options.replication_nodes);
-  boost::erase_all(iss, " ");
-  std::vector<std::string> replication_nodes;
-  boost::split(replication_nodes, iss, boost::is_any_of(","));
-
   for (auto &addr_port_str : replication_nodes) {
     std::vector<std::string> ip_port;
     boost::split(ip_port, addr_port_str, boost::is_any_of(":"));

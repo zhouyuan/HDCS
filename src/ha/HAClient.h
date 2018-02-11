@@ -101,6 +101,10 @@ public:
     return ss.str();
   }
 
+  HDCS_DOMAIN_ITEM_TYPE get_domain_item() {
+    return domain_item;
+  }
+
 private:
   HeartBeatService hb_service;
   name_to_conn_map_t conn_map;

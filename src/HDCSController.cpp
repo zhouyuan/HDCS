@@ -10,7 +10,8 @@ HDCSController::HDCSController(
   config_file_path(config_file_path),
   role(role),
   config(name, config_file_path) {
-  std::string log_path = config.get_config("HDCSController")["log_to_file"];
+  conf_of_HDCSController = config.get_config("HDCSController");
+  std::string log_path = conf_of_HDCSController["log_to_file"];
   std::cout << "log_path: " << log_path << std::endl;
   if( log_path!="false" ){
     int stderr_no = dup(fileno(stderr));
@@ -19,9 +20,12 @@ HDCSController::HDCSController(
     if(-1==dup2(fileno(log_fd), STDERR_FILENO)){}
   }
 
-  std::string _port = "9000";
-  if (role.compare("slave") == 0) {
-    _port = "9001";
+  std::vector<std::string> ip_port;
+  std::string _port;
+  auto local_addr_it = conf_of_HDCSController.find(name);
+  if (local_addr_it != conf_of_HDCSController.end()) {
+    boost::split(ip_port, local_addr_it->second, boost::is_any_of(":"));
+    _port = ip_port[1];
   }
 
   //setup HAClient
@@ -53,15 +57,27 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
   switch (io_ctx->type) {
     case HDCS_CONNECT:
     {
-      std::string name(data, io_ctx->length);
+      std::string volume_name(data, io_ctx->length);
 
       hdcs_core_map_mutex.lock();
-      auto it = hdcs_core_map.find(name);
+      auto it = hdcs_core_map.find(volume_name);
       if (it == hdcs_core_map.end()) {
         //get replication_options from HDCSManager
-        hdcs_repl_options replication_options(role, ha_client->printToString_domain_item());
-        core::HDCSCore* core_inst = new core::HDCSCore(name, config_file_path, replication_options);
-        auto ret = hdcs_core_map.insert(std::pair<std::string, core::HDCSCore*>(name, core_inst));
+        std::vector<std::string> replication_nodes;
+        bool first = true;
+        for (auto &host_name : ha_client->get_domain_item()) {
+          if (first) {
+            first = false;
+            continue;
+          }
+          auto host_addr_it = conf_of_HDCSController.find(host_name);
+          if ( host_addr_it != conf_of_HDCSController.end() ) {
+            replication_nodes.push_back(host_addr_it->second);
+          }
+        }
+        hdcs_repl_options replication_options(role, std::move(replication_nodes));
+        core::HDCSCore* core_inst = new core::HDCSCore(name, volume_name, config_file_path, std::move(replication_options));
+        auto ret = hdcs_core_map.insert(std::pair<std::string, core::HDCSCore*>(volume_name, core_inst));
         assert (ret.second);
         it = ret.first;
       }
@@ -105,11 +121,6 @@ void HDCSController::handle_request(void* session_id, std::string msg_content) {
       break;
     case HDCS_WRITE:
     {
-      if (io_ctx->offset == 871018496) {
-        struct timespec spec;
-        clock_gettime(CLOCK_REALTIME, &spec);
-        fprintf(stderr, "%lu: hdcscontroller received %lu - %lu\n", (spec.tv_sec * 1000000000L + spec.tv_nsec), io_ctx->offset, io_ctx->offset + io_ctx->length);
-      }
       hdcs_inst = (core::HDCSCore*)io_ctx->hdcs_inst; 
       void* cli_comp = io_ctx->comp;
       char* aligned_data;

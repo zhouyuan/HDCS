@@ -10,18 +10,16 @@
 #include <boost/property_tree/ptree.hpp>
 #include <boost/property_tree/ini_parser.hpp>
 
+namespace hdcs {
 #define HDCS_OK        0
 #define HDCS_ERR      -1
 #define HDCS_EAGIN    -2
 #define HDCS_ENOMEM   -3
 
-
-namespace hdcs {
-
+typedef std::map<std::string, std::string> ConfigInfo;
 class Config{
 
 public:
-  typedef std::map<std::string, std::string> ConfigInfo;
   Config(std::string name, std::string config_name="/etc/hdcs/general.conf"): name(name) {
       const std::string cfg_file = config_name;
       try {
@@ -29,11 +27,7 @@ public:
       } catch(const std::exception &exc) {
           std::cout << "error when reading: " << cfg_file
                     << ", error: " << exc.what() << std::endl;
-          // assume general.conf should be created by admin manually
       }
-
-      //print config
-      //printTree(pt, 0);
   }
 
   ~Config(){
@@ -102,7 +96,11 @@ public:
             host_list = pos->first;
           else
             host_list += "," + pos->first;
-          configValues[pos->first] = pt.get<std::string>(pos->first + ".addr");
+          try {
+          configValues[pos->first] = pt.get<std::string>(pos->first + ".adm_addr");
+          } catch (...) {
+            continue;
+          }
         }
       }
       configValues["hdcs_host_list"] = host_list;
@@ -126,6 +124,15 @@ public:
               configValues[it->first] = s;
           }
           s = "";
+      }
+      for (boost::property_tree::ptree::iterator pos = pt.begin(); pos != pt.end(); pos++) {
+        if (pos->first != "global") {
+          try {
+            configValues[pos->first] = pt.get<std::string>(pos->first + ".data_addr");
+          } catch (...) {
+            continue;
+          }
+        }
       }
       for (auto &it : configValues) {
           std::cout << it.first << " : " << it.second << std::endl;
@@ -165,6 +172,25 @@ public:
       configValues["cache_dir_meta"] = configValues["cache_dir"] + "/" + name + "_meta";
       configValues["cache_dir_run"] = configValues["cache_dir"] + "/" + name + "_run";
 
+      /*for (auto &it : configValues) {
+          std::cout << it.first << " : " << it.second << std::endl;
+      }*/
+      return configValues;
+    } else if (type.compare("HDCSClient") == 0) {
+      ConfigInfo configValues{
+        {"addr","127.0.0.1:9000"},
+      };
+      std::string s;
+      for (boost::property_tree::ptree::iterator pos = pt.begin(); pos != pt.end(); pos ++) {
+        if (pos->first != name) {
+          continue;
+        }
+        try {
+          configValues["addr"] = pt.get<std::string>(pos->first + ".addr");
+        } catch (...) {
+          continue;
+        }
+      }
       for (auto &it : configValues) {
           std::cout << it.first << " : " << it.second << std::endl;
       }

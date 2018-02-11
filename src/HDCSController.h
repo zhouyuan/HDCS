@@ -2,9 +2,9 @@
 #ifndef HDCS_CONTROLLER_H
 #define HDCS_CONTROLLER_H
 
-#include "common/Config.h"
-#include "Network/hdcs_networking.h"
+//#include "common/Config.h"
 #include "core/HDCSCore.h"
+#include "Network/hdcs_networking.h"
 #include "common/HDCS_REQUEST_CTX.h"
 #include "ha/HAClient.h"
 
@@ -17,6 +17,8 @@ namespace hdcs {
     void handle_request(void* session_id, std::string msg_content);
   private:
     Config config;
+    //std::map<std::string, std::string> conf_of_HDCSController;
+    ConfigInfo conf_of_HDCSController;
     std::string name;
     std::string config_file_path;
     networking::server *network_service;
