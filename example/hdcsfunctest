@@ -1,10 +1,3 @@
-cd src/ha/libcrush
-bash build.sh
-ldconfig
-cd ../../../
-mkdir -p build && cd build && rm -rf *
-cmake ../
-make clean && make -j && make install
 mkdir -p /etc/hdcs; cp ../example/general.conf /etc/hdcs/general.conf
 rm -rf /mnt/cache/ && mkdir -p /mnt/cache/
 killall -9 HDCS
@@ -21,7 +14,7 @@ HDCS --name host05_slave -r slave -c ../example/general.conf &
 HDCS --name host06       -r master -c ../example/general.conf &
 HDCS --name host06_slave -r slave -c ../example/general.conf &
 git clone https://github.com/xuechendi/fio
-cd fio; ./configure; make -j; make install
+cd fio && ./configure && make -j && make install
 ldconfig && cd .. && fio ../example/fio.conf --section randwrite
 rm -rf /mnt/cache/*
 killall -9 HDCS
