@@ -149,4 +149,4 @@ include_directories(
     ${PROJECT_SOURCE_DIR}/${HLKVDS_ROOT}/src/include
     )
 add_dependencies(HDCS libcrush)
-add_dependencies(hdcs-admin hdcs-mgr libcrush)
+add_dependencies(hdcs-admin HDCS)
