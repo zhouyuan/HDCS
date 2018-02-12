@@ -4,3 +4,6 @@
 [submodule "hlkvds"]
 	path = deps/src/hlkvds
 	url = https://github.com/Intel-bigdata/HLKVDS
+[submodule "libcrush"]
+	path = deps/src/libcrush
+	url = https://github.com/zhouyuan/libcrush
