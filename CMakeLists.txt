@@ -148,5 +148,5 @@ set(HLKVDS_ROOT deps/src/libcrush CACHE STRING "libcrush source root")
 include_directories(
     ${PROJECT_SOURCE_DIR}/${HLKVDS_ROOT}/src/include
     )
-add_dependencies(hdcs libcrush)
+add_dependencies(HDCS libcrush)
 add_dependencies(hdcs-admin hdcs-mgr libcrush)
