@@ -20,7 +20,6 @@ set(hdcs_internal_src
     ${HDCS_SRC_DIR}/core/HDCSCore.cpp
     ${HDCS_SRC_DIR}/core/policy/CachePolicy.cpp
     ${HDCS_SRC_DIR}/core/policy/TierPolicy.cpp
-    ${HDCS_SRC_DIR}/HDCSController.cpp
     ${HDCS_SRC_DIR}/store/SimpleStore/SimpleBlockStore.cpp
     ${HDCS_SRC_DIR}/store/DataStore.cpp
     ${HDCS_SRC_DIR}/store/KVStore/KVStore.cpp
@@ -32,7 +31,9 @@ add_library(hdcs SHARED
     ${HDCS_SRC_DIR}/libhdcs.cpp
     )
 
-target_link_libraries(hdcs ${PROJECT_SOURCE_DIR}/deps/src/hlkvds/src/libhlkvds.a boost_thread boost_system boost_program_options rados rbd)
+target_link_libraries(hdcs
+    ${PROJECT_SOURCE_DIR}/deps/src/hlkvds/src/libhlkvds.a
+    boost_thread boost_system boost_program_options rados rbd)
 
 
 add_executable(HDCS
