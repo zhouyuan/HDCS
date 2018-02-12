@@ -40,21 +40,24 @@ add_executable(HDCS
     ${HDCS_SRC_DIR}/HDCSController.cpp
     )
 
-target_link_libraries(HDCS hdcs boost_thread boost_system boost_program_options rados rbd crush)
+target_link_libraries(HDCS hdcs boost_thread boost_system boost_program_options rados rbd
+    ${PROJECT_SOURCE_DIR}/deps/src/libcrush/build/libcrush_static.a)
 
 
 add_executable(hdcs-mgr
   ${HDCS_SRC_DIR}/HDCSManager.cpp
   )
 
-target_link_libraries(hdcs-mgr boost_thread boost_system boost_program_options crush)
+target_link_libraries(hdcs-mgr boost_thread boost_system boost_program_options
+    ${PROJECT_SOURCE_DIR}/deps/src/libcrush/build/libcrush_static.a)
 
 
 add_executable(hdcs-admin
   ${HDCS_SRC_DIR}/HDCSAdmin.cpp
   )
 
-target_link_libraries(hdcs-admin boost_thread boost_system boost_program_options crush)
+target_link_libraries(hdcs-admin boost_thread boost_system boost_program_options
+    ${PROJECT_SOURCE_DIR}/deps/src/libcrush/build/libcrush_static.a)
 
 
 install(TARGETS HDCS DESTINATION bin)
@@ -132,3 +135,17 @@ include_directories(
 
 
 add_dependencies(hdcs hlkvds)
+
+add_custom_target(
+    libcrush
+    COMMAND cd deps/src/libcrush && bash build.sh
+    WORKING_DIRECTORY ${PROJECT_SOURCE_DIR}
+    )
+add_dependencies(libcrush update_submodules)
+
+set(HLKVDS_ROOT deps/src/libcrush CACHE STRING "libcrush source root")
+include_directories(
+    ${PROJECT_SOURCE_DIR}/${HLKVDS_ROOT}/src/include
+    )
+add_dependencies(hdcs libcrush)
+add_dependencies(hdcs-admin hdcs-mgr)
