@@ -66,9 +66,21 @@ extern "C" int hdcs_open(void** io, char* name) {
   *io = malloc(sizeof(hdcs_ioctx_t));
   hdcs_ioctx_t* io_ctx = (hdcs_ioctx_t*)*io;
 
-  io_ctx->conn = new hdcs::networking::Connection([](void* p, std::string s){request_handler(p, s);}, 16, 5);
+  hdcs::networking::ClientOptions client_options;
+  client_options._io_service_num = 3;
+  client_options._session_num = 3;
+  client_options._thd_num_on_one_session = 3;
+  client_options._process_msg = ([](void* p, std::string s){request_handler(p, s);});
+  client_options._process_msg_arg = *io;
+
+  io_ctx->conn = new hdcs::networking::Connection(client_options);
 
   hdcs::HDCS_REQUEST_CTX msg_content(HDCS_CONNECT, nullptr, nullptr, 0, strlen(name), name);
+  // the third param :
+  // TCP communication: 0
+  // RDMA communication: 1
+  // TODO local communication: 2  
+
   hdcs::Config *hdcs_config = new hdcs::Config(name);
   std::string addr = hdcs_config->get_config("HDCSClient")["addr"];
   std::vector<std::string> ip_port;
@@ -76,7 +88,7 @@ extern "C" int hdcs_open(void** io, char* name) {
   std::string ip = ip_port[0];
   std::string port = ip_port[1];
 
-  io_ctx->conn->connect(ip, port);
+  io_ctx->conn->connect(ip, port, (hdcs::networking::TCP_COMMUNICATION));
   io_ctx->conn->set_session_arg(*io);
 
   io_ctx->conn->communicate(std::move(std::string(msg_content.data(), msg_content.size())));

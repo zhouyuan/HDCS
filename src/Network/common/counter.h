@@ -30,25 +30,31 @@ inline T atomic_swap(volatile T* lockword, T value)
 class AtomicCounter64
 {
 public:
+
     AtomicCounter64() : _counter(0) {}
+
     AtomicCounter64(uint64_t init) : _counter(init) {}
+
     uint64_t operator ++ ()
     {
         return atomic_inc_ret_old64(&_counter) + 1LU;
     }
+
     uint64_t operator -- ()
     {
         return atomic_dec_ret_old64(&_counter) - 1LU;
     }
+
     operator uint64_t () const
     {
         return _counter;
     }
+
 private:
     volatile uint64_t _counter;
 };
 
-}
-}
+} //hdcs
+} //networking
 
 #endif

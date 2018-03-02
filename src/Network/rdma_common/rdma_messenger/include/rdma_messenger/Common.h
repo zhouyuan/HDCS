@@ -1,0 +1,13 @@
+// Copyright [2017] <Intel>
+
+#define SUPPORT_HUGE_PAGE 0
+#define HUGE_PAGE_SIZE (2*1024*1024)
+#define ALIGN_TO_PAGE_SIZE(x) \
+  (((x) + HUGE_PAGE_SIZE - 1) / HUGE_PAGE_SIZE * HUGE_PAGE_SIZE)
+
+#define RECV_QUEUE_SIZE_PER_QP 64
+#define SEND_QUEUE_SIZE_PER_QP 64
+#define QUEUE_BUFFER_SIZE 40960
+#define CQ_DEPTH 4096
+#define IO_WORKER_NUMS 20
+#define SUPPORT_SRQ 1
