@@ -102,6 +102,10 @@ public:
     {
         acceptor_ptr->start();
     }
+    // start listen
+    bool start( ProcessMsg process_msg ){
+        acceptor_ptr->start( process_msg );
+    }
 
     //this is async send, but hdcs use this interface name.
     void send(void* session_arg, std::string send_buffer, OnSentServer _callback = NULL)

@@ -95,6 +95,19 @@ public:
         }
     }
 
+    void start(ProcessMsg _process_msg){
+        if(asio_acceptor_ptr != NULL)
+        {
+            asio_acceptor_ptr->start(_process_msg);
+            return;
+        }
+        if(rdma_acceptor_ptr != NULL)
+        {
+            rdma_acceptor_ptr->start(_process_msg);
+        }
+
+    }
+
     // to avoid to call muilti sync_run()
     void sync_run()
     {

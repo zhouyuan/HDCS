@@ -28,7 +28,7 @@ public:
     std::string port = node.substr(colon_pos + 1, node.length() - colon_pos);
     //not same as current messenger, dehao will fix network later.
     auto it = conn_map.insert(std::pair<std::string, networking::Connection*>(node_name,
-      new networking::Connection([&](void* p, std::string s){request_handler(p, s);}, 1, 1)));
+      new networking::Connection([&](void* p, std::string s){request_handler(p, s);}, nullptr, 1, 1)));
     it.first->second->connect(addr, port);
     
     //send connect msg

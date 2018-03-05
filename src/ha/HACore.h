@@ -57,8 +57,9 @@ public:
   HACore (std::string name, HAConfig ha_config) :
     name(name),
     ha_config(ha_config),
-    listener("0.0.0.0", ha_config.get_host_port(name), 1, 1) {
-    listener.start([&](void* p, std::string s){request_handler(p, s);});
+    listener([&](void* p, std::string s){request_handler(p, s);},
+             "0.0.0.0", ha_config.get_host_port(name), 1, 1) {
+    listener.start();
     listener.async_run();
   }
 

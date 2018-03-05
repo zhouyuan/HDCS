@@ -89,7 +89,6 @@ extern "C" int hdcs_open(void** io, char* name) {
   std::string port = ip_port[1];
 
   io_ctx->conn->connect(ip, port, (hdcs::networking::TCP_COMMUNICATION));
-  io_ctx->conn->set_session_arg(*io);
 
   io_ctx->conn->communicate(std::move(std::string(msg_content.data(), msg_content.size())));
   delete hdcs_config;

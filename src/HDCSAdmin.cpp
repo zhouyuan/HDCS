@@ -9,7 +9,7 @@ void request_handler (void* session_arg, std::string msg_content) {
 
 void process_cmd (std::string addr, std::string port, std::string cmd) {
   //create connection to HAManager
-  hdcs::networking::Connection conn([&](void* p, std::string s){request_handler(p, s);}, 1, 1);
+  hdcs::networking::Connection conn([&](void* p, std::string s){request_handler(p, s);}, nullptr, 1, 1);
   conn.connect(addr, port);
 
   //create cmd msg
