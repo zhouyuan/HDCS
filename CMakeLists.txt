@@ -10,6 +10,7 @@ set(CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS} "-std=c++11 -O2 -g -pthread")
 
 include_directories(${PROJECT_SOURCE_DIR}/src)
 include_directories(${PROJECT_SOURCE_DIR}/src/common)
+include_directories(${PROJECT_SOURCE_DIR}/src/Network/rdma_common/rdma_messenger/include)
 
 set(HDCS_SRC_DIR ${PROJECT_SOURCE_DIR}/src)
 
@@ -26,14 +27,22 @@ set(hdcs_internal_src
     ${HDCS_SRC_DIR}/store/RBD/RBDImageStore.cpp
     )
 
+set(rdma_src
+    ${HDCS_SRC_DIR}/Network/rdma_common/rdma_messenger/src/core/Connector.cc
+    ${HDCS_SRC_DIR}/Network/rdma_common/rdma_messenger/src/core/Acceptor.cc
+    ${HDCS_SRC_DIR}/Network/rdma_common/rdma_messenger/src/core/RDMAStack.cc
+    ${HDCS_SRC_DIR}/Network/rdma_common/rdma_messenger/src/core/RDMAConnection.cc
+   )
+
 add_library(hdcs SHARED
     ${hdcs_internal_src}
+    ${rdma_src}
     ${HDCS_SRC_DIR}/libhdcs.cpp
     )
 
 target_link_libraries(hdcs
     ${PROJECT_SOURCE_DIR}/deps/src/hlkvds/src/libhlkvds.a
-    boost_thread boost_system boost_program_options rados rbd)
+    boost_thread boost_system boost_program_options rados rbd rdmacm ibverbs)
 
 
 add_executable(HDCS
@@ -41,7 +50,8 @@ add_executable(HDCS
     ${HDCS_SRC_DIR}/HDCSController.cpp
     )
 
-target_link_libraries(HDCS hdcs boost_thread boost_system boost_program_options rados rbd
+target_link_libraries(HDCS hdcs
+    boost_thread boost_system boost_program_options rados rbd
     ${PROJECT_SOURCE_DIR}/deps/src/libcrush/build/libcrush_static.a)
 
 
@@ -49,7 +59,7 @@ add_executable(hdcs-mgr
   ${HDCS_SRC_DIR}/HDCSManager.cpp
   )
 
-target_link_libraries(hdcs-mgr boost_thread boost_system boost_program_options
+target_link_libraries(hdcs-mgr hdcs boost_thread boost_system boost_program_options
     ${PROJECT_SOURCE_DIR}/deps/src/libcrush/build/libcrush_static.a)
 
 
@@ -57,7 +67,7 @@ add_executable(hdcs-admin
   ${HDCS_SRC_DIR}/HDCSAdmin.cpp
   )
 
-target_link_libraries(hdcs-admin boost_thread boost_system boost_program_options
+target_link_libraries(hdcs-admin hdcs boost_thread boost_system boost_program_options
     ${PROJECT_SOURCE_DIR}/deps/src/libcrush/build/libcrush_static.a)
 
 

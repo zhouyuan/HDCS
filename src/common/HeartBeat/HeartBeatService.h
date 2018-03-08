@@ -20,8 +20,10 @@ public:
   }
 
   int add_listener (std::string port) {
-    hb_server = std::make_shared<networking::server>("0.0.0.0", port, 1, 1);
-    hb_server->start([&](void* p, std::string s){request_handler(p, s, hb_server.get());});
+    hb_server = std::make_shared<networking::server>(
+      [&](void* p, std::string s){request_handler(p, s, hb_server.get());},
+      "0.0.0.0", port, 1, 1);
+    hb_server->start();
     hb_server->sync_run();
     return 0;
   }
@@ -32,7 +34,7 @@ public:
       colon_pos = node.find(':');
       std::string addr = node.substr(0, colon_pos);
       std::string port = node.substr(colon_pos + 1, node.length() - colon_pos);
-      conn = new networking::Connection([&](void* p, std::string s){request_handler(p, s);}, 1, 1);
+      conn = new networking::Connection([&](void* p, std::string s){request_handler(p, s);}, nullptr, 1, 1);
       conn->connect(addr, port);
     }
   

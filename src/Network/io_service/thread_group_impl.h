@@ -18,29 +18,37 @@ namespace networking {
 class ThreadGroupImpl;
 typedef std::shared_ptr<ThreadGroupImpl> ThreadGroupImplPtr;
 
-class ThreadGroupImpl{
+class ThreadGroupImpl
+{
 public:
+
     ThreadGroupImpl(int thread_num)
         : _is_running(false)
         , _thread_num(std::max(thread_num, 1))
         , _io_service_work(NULL)
     {}
 
-    ~ThreadGroupImpl(){
+    ~ThreadGroupImpl()
+    {
         stop();
     }
 
-    int thread_num() const{
+    // return thread num in this threadpool
+    int thread_num() const
+    {
         return _thread_num;
     }
 
-    IOService& io_service(){
+    // return io_server object.
+    IOService& io_service()
+    {
         return _io_service;
     }
 
     bool start()
     {
-        if (_is_running){
+        if (_is_running)
+        {
             return true;
         }
         _is_running = true;
@@ -56,8 +64,10 @@ public:
         return true;
     }
 
-    void stop(){
-        if (!_is_running){
+    void stop()
+    {
+        if (!_is_running)
+        {
             return;
         }
         _is_running = false;
@@ -65,7 +75,8 @@ public:
         delete _io_service_work;
         _io_service_work = NULL;
 
-        for (int i = 0; i < _thread_num; ++i){
+        for (int i = 0; i < _thread_num; ++i)
+        {
             // must explicitly call stop
             _io_service.stop();
             _threads[i].join();
@@ -77,7 +88,8 @@ public:
     // The function signature of the handler must be:
     //   void handler();
     template< typename CompletionHandler >
-    void dispatch(CompletionHandler handler){
+    void dispatch(CompletionHandler handler)
+    {
         _io_service.dispatch(handler);
     }
 
@@ -86,7 +98,8 @@ public:
     // The function signature of the handler must be:
     //   void handler();
     template< typename CompletionHandler >
-    void post(CompletionHandler handler){
+    void post(CompletionHandler handler)
+    {
         _io_service.post(handler);
     }
 
@@ -96,9 +109,9 @@ private:
     IOService _io_service;
     IOServiceWork* _io_service_work;
     std::vector<std::thread> _threads;
-};
+}; 
 
-} 
-} 
+} // networking
+} // hdcs
 
 #endif 
