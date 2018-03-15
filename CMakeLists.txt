@@ -154,9 +154,10 @@ add_custom_target(
     )
 add_dependencies(libcrush update_submodules)
 
-set(HLKVDS_ROOT deps/src/libcrush CACHE STRING "libcrush source root")
+set(LIBCRUSH_ROOT deps/src/libcrush CACHE STRING "libcrush source root")
 include_directories(
-    ${PROJECT_SOURCE_DIR}/${HLKVDS_ROOT}/src/include
+    ${PROJECT_SOURCE_DIR}/${LIBCRUSH_ROOT}/
+    ${PROJECT_SOURCE_DIR}/${LIBCRUSH_ROOT}/build/crush
     )
 add_dependencies(HDCS libcrush)
 add_dependencies(hdcs-mgr HDCS)

@@ -2,9 +2,9 @@
 #define CRUSHMAP_GENERATOR_H
 
 extern "C" {
-#include "libcrush/crush/hash.h"
-#include "libcrush/crush/builder.h"
-#include "libcrush/crush/mapper.h"
+#include "crush/hash.h"
+#include "crush/builder.h"
+#include "crush/mapper.h"
 }
 
 #include <map>
